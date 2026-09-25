@@ -1,4 +1,4 @@
-import { brandingSchema, customFieldDefSchema, moduleStatus, moduleToggleSchema, PERMISSIONS, roleSchema, terminologySchema } from "@rapportini/shared";
+import { brandingSchema, customFieldDefSchema, moduleStatus, moduleToggleSchema, needsSchema, PERMISSIONS, roleSchema, terminologySchema } from "@rapportini/shared";
 import { categoryOfTenant } from "../lib/catalog";
 import type { FastifyInstance } from "fastify";
 import { HttpError, must, parseBody } from "../errors";
@@ -25,8 +25,8 @@ export async function settingsRoutes(app: FastifyInstance) {
     const body = parseBody(roleSchema.partial(), request.body);
     const db = tenantDb(tenantId(request));
     const role = await must(db.role.findFirst({ where: { id: idOf(request) } }), "Ruolo");
-    if (role.isSystem && body.permissions && !body.permissions.includes("settings.manage")) {
-      throw new HttpError(400, "Il titolare deve poter gestire le impostazioni");
+    if (role.isSystem && body.permissions && (!body.permissions.includes("settings.manage") || !body.permissions.includes("team.manage"))) {
+      throw new HttpError(400, "Il titolare deve poter gestire impostazioni e utenti");
     }
     return db.role.update({ where: { id: role.id }, data: { name: role.isSystem ? role.name : body.name, permissions: body.permissions } });
   });
@@ -102,6 +102,14 @@ export async function settingsRoutes(app: FastifyInstance) {
     const tenant = await must(prisma.tenant.findUnique({ where: { id } }), "Negozio");
     const branding = { ...(tenant.branding as object), ...body };
     return prisma.tenant.update({ where: { id }, data: { branding } });
+  });
+
+  app.patch("/settings/needs", { preHandler: manage }, async (request) => {
+    const { needs } = parseBody(needsSchema, request.body);
+    const id = tenantId(request);
+    const available = new Set((await categoryOfTenant(id)).needs.map((need) => need.key));
+    await prisma.tenant.update({ where: { id }, data: { needs: [...new Set(needs)].filter((key) => available.has(key)) } });
+    return { ok: true };
   });
 
   app.patch("/settings/terminology", { preHandler: manage }, async (request) => {

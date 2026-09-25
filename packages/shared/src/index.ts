@@ -4,4 +4,7 @@ export * from "./modules";
 export * from "./verticals";
 export * from "./catalog";
 export * from "./manifest";
+export * from "./seats";
 export * from "./schemas";
+export * from "./activity";
+export * from "./barcode";

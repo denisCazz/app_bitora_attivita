@@ -1,15 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
-import { categorySchema, VERTICALS, type Vertical } from "@rapportini/shared";
+import { categorySchema } from "@rapportini/shared";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { View } from "react-native";
 import { Badge, Button, Card, Input, ListItem, Screen, Sheet, Text, useTheme } from "@rapportini/ui";
-import { childrenOf, useAdminCatalog, useAdminMutation, type AdminCategory } from "../../../src/admin";
+import { childrenOf, useAdminCatalog, useAdminMutation, useAdminUsers, type AdminCategory } from "../../../src/admin";
 import { http } from "../../../src/api/client";
-import { Chip } from "../../../src/components/Chip";
+import { queryClient } from "../../../src/api/query";
+import { useAuth } from "../../../src/auth/store";
 import { QueryState } from "../../../src/components/States";
-
-const FAMILY_LABEL: Record<Vertical, string> = { FIELD_SERVICE: "Assistenza tecnica", HOSPITALITY: "Ristorazione" };
+import { useManifest } from "../../../src/session";
 
 function slugify(value: string) {
   return value
@@ -25,24 +25,23 @@ export default function ConsoleScreen() {
   const theme = useTheme();
   const router = useRouter();
   const catalog = useAdminCatalog();
+  const users = useAdminUsers();
+  const manifest = useManifest();
+  const clear = useAuth((state) => state.clear);
   const [creating, setCreating] = useState<{ parent: AdminCategory | null } | null>(null);
   const [label, setLabel] = useState("");
-  const [family, setFamily] = useState<Vertical>("FIELD_SERVICE");
   const [error, setError] = useState<string | null>(null);
   const categories = catalog.data?.categories ?? [];
 
-  const create = useAdminMutation((input: { label: string; parent: AdminCategory | null; family: Vertical }) =>
-    http.post<{ id: string }>(
-      "/admin/categories",
-      categorySchema.parse({ label: input.label, key: slugify(input.label), family: input.parent?.family ?? input.family, parentId: input.parent?.id ?? null }),
-    ),
+  const create = useAdminMutation((input: { label: string; parent: AdminCategory | null }) =>
+    http.post<{ id: string }>("/admin/categories", categorySchema.parse({ label: input.label, key: slugify(input.label), parentId: input.parent?.id ?? null })),
   );
 
   async function submit() {
     if (!creating) return;
     setError(null);
     try {
-      const created = (await create.mutateAsync({ label: label.trim(), parent: creating.parent, family })) as { id: string };
+      const created = (await create.mutateAsync({ label: label.trim(), parent: creating.parent })) as { id: string };
       setCreating(null);
       setLabel("");
       router.push(`/(app)/admin/${created.id}`);
@@ -67,13 +66,32 @@ export default function ConsoleScreen() {
     />
   );
 
+  async function leave() {
+    if (manifest.data) {
+      router.back();
+      return;
+    }
+    await clear();
+    queryClient.clear();
+    router.replace("/(auth)/login");
+  }
+
   return (
-    <Screen onBack={() => router.back()} backLabel="Altro">
+    <Screen onBack={() => void leave()} backLabel={manifest.data ? "Altro" : "Esci"}>
       <View style={{ gap: 6 }}>
         <Badge tone="accent" label="Team Bitora" />
         <Text variant="display">Console</Text>
-        <Text muted>Categorie, moduli, prezzi e ruoli. Le modifiche arrivano nelle app dei clienti in pochi secondi, senza aggiornamenti.</Text>
+        <Text muted>Utenti e personalizzazioni di ogni negozio. Categorie, moduli e prezzi arrivano nelle app dei clienti in pochi secondi.</Text>
       </View>
+
+      <Card style={{ paddingVertical: 4 }}>
+        <ListItem
+          title="Utenti"
+          subtitle={users.data ? `${users.data.length} account` : "Account, negozi e personalizzazioni"}
+          leading={<Ionicons name="people-outline" size={20} color={theme.colors.accent} />}
+          onPress={() => router.push("/(app)/admin/users")}
+        />
+      </Card>
 
       <Card style={{ paddingVertical: 4 }}>
         <ListItem
@@ -104,16 +122,9 @@ export default function ConsoleScreen() {
       <Sheet visible={Boolean(creating)} title={creating?.parent ? `Nuova sottocategoria di ${creating.parent.label}` : "Nuova categoria"} onClose={() => setCreating(null)}>
         <Input label="Nome" value={label} onChangeText={setLabel} placeholder={creating?.parent ? "Es. Pompe di calore" : "Es. Pulizie"} autoFocus />
         {creating && !creating.parent ? (
-          <View style={{ gap: 8 }}>
-            <Text variant="caption" muted>
-              Famiglia (decide quali schermate usa l'app)
-            </Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-              {VERTICALS.map((item) => (
-                <Chip key={item} label={FAMILY_LABEL[item]} active={family === item} onPress={() => setFamily(item)} />
-              ))}
-            </View>
-          </View>
+          <Text variant="caption" muted>
+            Un nuovo settore: poi scegli quali moduli sono gratis e quali consigliati, le parole, i ruoli e le esigenze da proporre.
+          </Text>
         ) : (
           <Text variant="caption" muted>
             Eredita moduli, ruoli, termini e colori dalla categoria padre: poi cambi solo quello che serve.

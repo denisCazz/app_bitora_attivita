@@ -27,6 +27,20 @@ export function useStartTrial() {
   });
 }
 
+export function useUpdateSeats() {
+  return useMutation({
+    mutationFn: async (extraSeats: number) => {
+      const result = await http.post<{ mode: "demo" | "updated"; extraSeats: number } | { mode: "stripe"; url: string }>("/billing/seats", { extraSeats });
+      if (result.mode === "stripe") await WebBrowser.openBrowserAsync(result.url, { presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET });
+      return result;
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["team"] });
+      await refreshPlan();
+    },
+  });
+}
+
 export function useCheckout() {
   return useMutation({
     mutationFn: async (moduleKeys: ModuleKey[]) => {
@@ -38,7 +52,18 @@ export function useCheckout() {
   });
 }
 
+export function useBillingPortal() {
+  return useMutation({
+    mutationFn: async () => {
+      const result = await http.post<{ url: string }>("/billing/portal");
+      await WebBrowser.openBrowserAsync(result.url, { presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET });
+      return result;
+    },
+    onSettled: refreshPlan,
+  });
+}
+
 export function useLockedModules(): ManifestModule[] {
   const manifest = useManifest();
-  return (manifest.data?.modules ?? []).filter((module) => module.status === "locked" || module.status === "trial");
+  return (manifest.data?.modules ?? []).filter((module) => module.status === "locked" || module.status === "trial").sort((a, b) => b.score - a.score);
 }

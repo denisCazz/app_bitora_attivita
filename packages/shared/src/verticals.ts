@@ -7,6 +7,8 @@ export const TERMINOLOGY_KEYS = [
   "customers",
   "sparePart",
   "spareParts",
+  "warehouse",
+  "vehicle",
 ] as const;
 
 export type Terminology = Record<(typeof TERMINOLOGY_KEYS)[number], string>;
@@ -20,6 +22,8 @@ export const BASE_TERMINOLOGY: Terminology = {
   customers: "Clienti",
   sparePart: "Ricambio",
   spareParts: "Ricambi",
+  warehouse: "Magazzino",
+  vehicle: "Mezzo",
 };
 
 export const DEFAULT_ACCENT = "#2F6FED";

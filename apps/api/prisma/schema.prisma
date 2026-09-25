@@ -7,14 +7,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Vertical {
-  FIELD_SERVICE
-  HOSPITALITY
-}
-
 enum MembershipStatus {
   ACTIVE
   INVITED
+  SUSPENDED
 }
 
 enum CustomFieldType {
@@ -42,9 +38,8 @@ enum WorkOrderStatus {
 
 enum StockLocationKind {
   WAREHOUSE
-  VAN
-  KITCHEN
-  BAR
+  MOBILE
+  POINT
 }
 
 enum OrderStatus {
@@ -63,12 +58,6 @@ enum OrderLineStatus {
   VOID
 }
 
-enum Station {
-  BAR
-  KITCHEN
-  OTHER
-}
-
 enum PurchaseOrderStatus {
   DRAFT
   SENT
@@ -81,13 +70,6 @@ enum ShiftStatus {
   CONFIRMED
   DONE
   CANCELLED
-}
-
-enum ScheduleKind {
-  ANNUAL_CLEANING
-  FLUE_CHECK
-  HACCP
-  GENERIC
 }
 
 model User {
@@ -132,48 +114,51 @@ model PushToken {
 }
 
 model Tenant {
-  id                 String              @id @default(cuid())
-  name               String
-  vertical           Vertical
-  categoryId         String
-  category           Category            @relation(fields: [categoryId], references: [id])
-  settings           Json                @default("{}")
-  branding           Json                @default("{}")
-  stripeCustomerId   String?             @unique
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  locations          Location[]
-  memberships        Membership[]
-  roles              Role[]
-  modules            TenantModule[]
-  customFields       CustomFieldDef[]
-  customers          Customer[]
-  assets             Asset[]
-  workOrders         WorkOrder[]
-  checklists         ChecklistTemplate[]
-  checklistRuns      ChecklistRun[]
-  attachments        Attachment[]
-  schedules          Schedule[]
-  spareParts         SparePart[]
-  stockLocations     StockLocation[]
-  stockMovements     StockMovement[]
-  tables             DiningTable[]
-  menuItems          MenuItem[]
-  modifiers          Modifier[]
-  menuItemModifiers  MenuItemModifier[]
-  orders             Order[]
-  orderLines         OrderLine[]
-  ingredients        Ingredient[]
-  recipes            Recipe[]
-  recipeLines        RecipeLine[]
-  suppliers          Supplier[]
-  purchaseOrders     PurchaseOrder[]
-  purchaseOrderLines PurchaseOrderLine[]
-  shifts             Shift[]
-  invites            Invite[]
-  notifications      Notification[]
+  id                        String              @id @default(cuid())
+  name                      String
+  categoryId                String
+  category                  Category            @relation(fields: [categoryId], references: [id])
+  needs                     String[]            @default([])
+  settings                  Json                @default("{}")
+  branding                  Json                @default("{}")
+  stripeCustomerId          String?             @unique
+  extraSeats                Int                 @default(0)
+  seatsStripeSubscriptionId String?
+  createdAt                 DateTime            @default(now())
+  updatedAt                 DateTime            @updatedAt
+  locations                 Location[]
+  memberships               Membership[]
+  roles                     Role[]
+  modules                   TenantModule[]
+  customFields              CustomFieldDef[]
+  customers                 Customer[]
+  assets                    Asset[]
+  workOrders                WorkOrder[]
+  checklists                ChecklistTemplate[]
+  checklistRuns             ChecklistRun[]
+  attachments               Attachment[]
+  schedules                 Schedule[]
+  spareParts                SparePart[]
+  stockLocations            StockLocation[]
+  stockMovements            StockMovement[]
+  tables                    DiningTable[]
+  menuItems                 MenuItem[]
+  modifiers                 Modifier[]
+  menuItemModifiers         MenuItemModifier[]
+  orders                    Order[]
+  orderLines                OrderLine[]
+  ingredients               Ingredient[]
+  recipes                   Recipe[]
+  recipeLines               RecipeLine[]
+  suppliers                 Supplier[]
+  purchaseOrders            PurchaseOrder[]
+  purchaseOrderLines        PurchaseOrderLine[]
+  shifts                    Shift[]
+  invites                   Invite[]
+  notifications             Notification[]
 
   @@index([categoryId])
+  @@index([seatsStripeSubscriptionId])
 }
 
 model Category {
@@ -182,7 +167,6 @@ model Category {
   parentId    String?
   parent      Category?        @relation("CategoryTree", fields: [parentId], references: [id])
   children    Category[]       @relation("CategoryTree")
-  family      Vertical
   label       String
   description String           @default("")
   icon        String           @default("apps-outline")
@@ -196,40 +180,62 @@ model Category {
   updatedAt   DateTime         @updatedAt
   modules     CategoryModule[]
   roles       CategoryRole[]
+  needs       Need[]
   tenants     Tenant[]
 
   @@index([parentId])
 }
 
-model ModuleDef {
-  key         String           @id
+model Need {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   label       String
-  description String           @default("")
-  pitch       String           @default("")
-  icon        String           @default("apps-outline")
-  priceCents  Int              @default(0)
-  trialDays   Int              @default(14)
-  sortOrder   Int              @default(0)
-  active      Boolean          @default(true)
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  categories  CategoryModule[]
+  description String    @default("")
+  icon        String    @default("checkmark-circle-outline")
+  modules     String[]
+  sortOrder   Int       @default(0)
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([categoryId])
+}
+
+model ModuleDef {
+  key             String           @id
+  label           String
+  description     String           @default("")
+  pitch           String           @default("")
+  icon            String           @default("apps-outline")
+  priceCents      Int              @default(0)
+  trialDays       Int              @default(14)
+  requires        String[]         @default([])
+  sortOrder       Int              @default(0)
+  active          Boolean          @default(true)
+  stripeProductId String?          @unique
+  stripePriceId   String?          @unique
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  categories      CategoryModule[]
 }
 
 model CategoryModule {
-  id         String    @id @default(cuid())
-  categoryId String
-  category   Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  moduleKey  String
-  module     ModuleDef @relation(fields: [moduleKey], references: [key], onDelete: Cascade)
-  included   Boolean   @default(true)
-  free       Boolean?
-  tab        Boolean?
+  id          String    @id @default(cuid())
+  categoryId  String
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  moduleKey   String
+  module      ModuleDef @relation(fields: [moduleKey], references: [key], onDelete: Cascade)
+  included    Boolean   @default(true)
+  recommended Boolean?
+  free        Boolean?
+  tab         Boolean?
   sortOrder   Int?
   label       String?
   description String?
   createdAt   DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  updatedAt   DateTime  @updatedAt
 
   @@unique([categoryId, moduleKey])
   @@index([moduleKey])
@@ -394,28 +400,29 @@ model Asset {
 }
 
 model WorkOrder {
-  id             String          @id @default(cuid())
-  tenantId       String
-  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customerId     String?
-  customer       Customer?       @relation(fields: [customerId], references: [id])
-  assetId        String?
-  asset          Asset?          @relation(fields: [assetId], references: [id])
-  assigneeId     String?
-  assignee       User?           @relation("Assignee", fields: [assigneeId], references: [id])
-  title          String
-  description    String?
-  status         WorkOrderStatus @default(DRAFT)
-  scheduledAt    DateTime?
-  completedAt    DateTime?
-  signatureData  String?
-  signedBy       String?
-  customFields   Json            @default("{}")
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  checklistRuns  ChecklistRun[]
-  attachments    Attachment[]
-  stockMovements StockMovement[]
+  id              String          @id @default(cuid())
+  tenantId        String
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId      String?
+  customer        Customer?       @relation(fields: [customerId], references: [id])
+  assetId         String?
+  asset           Asset?          @relation(fields: [assetId], references: [id])
+  assigneeId      String?
+  assignee        User?           @relation("Assignee", fields: [assigneeId], references: [id])
+  title           String
+  description     String?
+  status          WorkOrderStatus @default(DRAFT)
+  scheduledAt     DateTime?
+  durationMinutes Int?
+  completedAt     DateTime?
+  signatureData   String?
+  signedBy        String?
+  customFields    Json            @default("{}")
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  checklistRuns   ChecklistRun[]
+  attachments     Attachment[]
+  stockMovements  StockMovement[]
 
   @@index([tenantId, status])
   @@index([tenantId, scheduledAt])
@@ -426,7 +433,7 @@ model ChecklistTemplate {
   tenantId  String
   tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name      String
-  kind      ScheduleKind   @default(GENERIC)
+  kind      String         @default("GENERIC")
   items     Json
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
@@ -437,18 +444,18 @@ model ChecklistTemplate {
 }
 
 model ChecklistRun {
-  id          String            @id @default(cuid())
+  id          String             @id @default(cuid())
   tenantId    String
-  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   templateId  String?
   template    ChecklistTemplate? @relation(fields: [templateId], references: [id])
   workOrderId String?
-  workOrder   WorkOrder?        @relation(fields: [workOrderId], references: [id])
+  workOrder   WorkOrder?         @relation(fields: [workOrderId], references: [id])
   assetId     String?
   answers     Json
   completedAt DateTime?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
 
   @@index([tenantId])
   @@index([workOrderId])
@@ -471,20 +478,21 @@ model Attachment {
 }
 
 model Schedule {
-  id             String             @id @default(cuid())
-  tenantId       String
-  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  assetId        String?
-  asset          Asset?             @relation(fields: [assetId], references: [id])
-  templateId     String?
-  template       ChecklistTemplate? @relation(fields: [templateId], references: [id])
-  kind           ScheduleKind
-  title          String
-  dueAt          DateTime
-  intervalMonths Int?
-  lastRemindedAt DateTime?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  id              String             @id @default(cuid())
+  tenantId        String
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assetId         String?
+  asset           Asset?             @relation(fields: [assetId], references: [id])
+  templateId      String?
+  template        ChecklistTemplate? @relation(fields: [templateId], references: [id])
+  kind            String
+  title           String
+  dueAt           DateTime
+  durationMinutes Int?
+  intervalMonths  Int?
+  lastRemindedAt  DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   @@index([tenantId, dueAt])
 }
@@ -568,7 +576,7 @@ model MenuItem {
   tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name         String
   category     String
-  station      Station            @default(KITCHEN)
+  station      String
   price        Decimal            @db.Decimal(10, 2)
   available    Boolean            @default(true)
   customFields Json               @default("{}")
@@ -636,7 +644,7 @@ model OrderLine {
   menuItemId String?
   menuItem   MenuItem?       @relation(fields: [menuItemId], references: [id])
   name       String
-  station    Station
+  station    String
   quantity   Int             @default(1)
   unitPrice  Decimal         @db.Decimal(10, 2)
   modifiers  Json            @default("[]")
@@ -765,9 +773,12 @@ model Notification {
   userId    String?
   title     String
   body      String
+  href      String?
+  dedupeKey String?
   readAt    DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
   @@index([tenantId, createdAt])
+  @@index([tenantId, userId, dedupeKey])
 }

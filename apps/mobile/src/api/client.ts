@@ -1,7 +1,16 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 import { useAuth } from "../auth/store";
 
-export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3001";
+function apiUrl(): string {
+  const configured = process.env.EXPO_PUBLIC_API_URL?.trim();
+  if (configured) return configured;
+  const host = Constants.expoConfig?.hostUri?.split(":")[0];
+  if (host) return `http://${host}:3001`;
+  return "http://localhost:3001";
+}
+
+export const API_URL = apiUrl();
 const QUEUE_KEY = "rapportini.queue";
 
 export class ApiError extends Error {

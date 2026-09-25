@@ -1,7 +1,7 @@
 import type { Permission } from "./permissions";
 
-export const VERTICALS = ["FIELD_SERVICE", "HOSPITALITY"] as const;
-export type Vertical = (typeof VERTICALS)[number];
+export const STOCK_LOCATION_KINDS = ["WAREHOUSE", "MOBILE", "POINT"] as const;
+export type StockLocationKind = (typeof STOCK_LOCATION_KINDS)[number];
 
 export const MODULE_KEYS = [
   "dashboard",

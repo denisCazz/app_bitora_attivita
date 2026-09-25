@@ -96,7 +96,7 @@ export default function MoreScreen() {
         <Card style={{ paddingVertical: 4 }}>
           <ListItem
             title="Console Bitora"
-            subtitle="Categorie, moduli, prezzi e ruoli per tutti i clienti"
+            subtitle="Utenti, personalizzazioni, categorie e prezzi"
             leading={<Ionicons name="planet-outline" size={20} color={theme.colors.accent} />}
             onPress={() => router.push("/(app)/admin")}
           />

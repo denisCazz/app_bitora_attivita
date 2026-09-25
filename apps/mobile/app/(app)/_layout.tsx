@@ -1,4 +1,6 @@
-import { Tabs } from "expo-router";
+import { Camera } from "expo-camera";
+import { Tabs, useRouter } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
 import * as Notifications from "expo-notifications";
 import { useEffect, useState } from "react";
 import { Platform, View } from "react-native";
@@ -15,6 +17,7 @@ export default function AppLayout() {
   const manifest = useManifest();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [offline, setOffline] = useState(false);
 
   useEffect(() => {
@@ -23,6 +26,21 @@ export default function AppLayout() {
 
   useEffect(() => {
     async function register() {
+      if (Platform.OS === "ios") {
+        await Notifications.requestPermissionsAsync({
+          ios: { allowAlert: true, allowBadge: true, allowSound: true },
+        }).catch(() => undefined);
+        await Camera.requestCameraPermissionsAsync().catch(() => undefined);
+        await Camera.requestMicrophonePermissionsAsync().catch(() => undefined);
+        await ImagePicker.requestMediaLibraryPermissionsAsync().catch(() => undefined);
+        await ImagePicker.requestMediaLibraryPermissionsAsync(true).catch(() => undefined);
+      }
+      if (Platform.OS === "android") {
+        await Notifications.setNotificationChannelAsync("alerts", {
+          name: "Avvisi",
+          importance: Notifications.AndroidImportance.HIGH,
+        }).catch(() => undefined);
+      }
       const settings = await Notifications.getPermissionsAsync();
       const granted = settings.granted || (await Notifications.requestPermissionsAsync()).granted;
       if (!granted) return;
@@ -33,9 +51,20 @@ export default function AppLayout() {
     if (manifest.data) void register();
   }, [manifest.data]);
 
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      const href = response.notification.request.content.data?.href;
+      if (typeof href === "string" && href.startsWith("/") && !href.startsWith("//")) {
+        router.push(`/(app)${href}` as never);
+      }
+    });
+    return () => subscription.remove();
+  }, [router]);
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.paper }}>
       <Tabs
+        backBehavior="history"
         screenOptions={{ headerShown: false, animation: "fade", lazy: true, sceneStyle: { backgroundColor: "transparent" } }}
         tabBar={() => <TabBar items={manifest.data?.navigation ?? []} />}
       >

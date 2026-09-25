@@ -4,6 +4,7 @@ import { Badge, Card, EmptyState, Screen, Text } from "@rapportini/ui";
 import { http } from "../../../src/api/client";
 import { QueryState } from "../../../src/components/States";
 import { STATUS_LABEL } from "../../../src/format";
+import { useVocab, vocabLabel } from "../../../src/session";
 
 interface Order {
   id: string;
@@ -14,11 +15,12 @@ interface Order {
 
 export default function OrdersScreen() {
   const router = useRouter();
+  const { stations } = useVocab();
   const query = useQuery({ queryKey: ["orders"], queryFn: () => http.get<Order[]>("/orders") });
   return (
     <Screen>
       <Text variant="display">Comande</Text>
-      <Text muted>Quello che è partito verso bar e cucina.</Text>
+      <Text muted>Quello che è partito verso {stations.map((station) => station.label.toLowerCase()).join(", ")}.</Text>
       <QueryState isLoading={query.isLoading} error={query.error} refetch={() => query.refetch()}>
         {query.data?.length ? (
           query.data.map((order) => (
@@ -28,7 +30,7 @@ export default function OrdersScreen() {
               </Text>
               {order.lines.map((line) => (
                 <Text key={line.id} muted>
-                  {[`${line.quantity}× ${line.name}`, line.station === "BAR" ? "Bar" : line.station === "KITCHEN" ? "Cucina" : "", STATUS_LABEL[line.status]].filter(Boolean).join(" · ")}
+                  {[`${line.quantity}× ${line.name}`, stations.length > 1 ? vocabLabel(stations, line.station) : "", STATUS_LABEL[line.status]].filter(Boolean).join(" · ")}
                 </Text>
               ))}
               <Badge label={STATUS_LABEL[order.status] ?? order.status} tone="accent" />

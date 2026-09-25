@@ -3,12 +3,19 @@ import {
   checklistRunSchema,
   checklistTemplateSchema,
   customerSchema,
+  DEFAULT_ACCENT,
+  DEFAULT_SLOT_MINUTES,
+  mergeTerminology,
   scheduleSchema,
   signatureSchema,
+  slotMinutes,
   workOrderSchema,
+  type Terminology,
 } from "@rapportini/shared";
 import type { FastifyInstance } from "fastify";
 import { blankToNull, HttpError, must, num, parseBody } from "../errors";
+import { agenda, overlapsFor } from "../lib/agenda";
+import { categoryOfTenant } from "../lib/catalog";
 import { assertCustomFields } from "../lib/fields";
 import { renderWorkOrderPdf } from "../lib/pdf";
 import { prisma, tenantDb } from "../lib/prisma";
@@ -22,6 +29,17 @@ function idOf(request: { params: unknown }): string {
 
 function search(request: { query: unknown }): string {
   return ((request.query as { q?: string }).q ?? "").trim();
+}
+
+function recordOf(value: unknown): Partial<Terminology> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Partial<Terminology>;
+}
+
+function documentTitle(workOrder: string): string {
+  const word = workOrder.trim().toLowerCase();
+  if (!word || word === "intervento") return "Rapportino d'intervento";
+  return `Rapportino di ${word}`;
 }
 
 export async function coreRoutes(app: FastifyInstance) {
@@ -175,6 +193,7 @@ export async function coreRoutes(app: FastifyInstance) {
         description: blankToNull(body.description),
         status: body.status ?? "SCHEDULED",
         scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : null,
+        durationMinutes: body.durationMinutes ?? (body.scheduledAt ? DEFAULT_SLOT_MINUTES : null),
         customFields,
       },
       include: orderInclude,
@@ -231,17 +250,43 @@ export async function coreRoutes(app: FastifyInstance) {
 
   app.get("/work-orders/:id/pdf", { preHandler: [app.requireTenant, permit("work_orders.read"), moduleGuard("work_orders")] }, async (request, reply) => {
     const id = tenantId(request);
-    const report = await must(
-      prisma.workOrder.findFirst({
-        where: { id: idOf(request), tenantId: id },
-        include: { customer: true, asset: true, attachments: true, checklistRuns: true },
+    const [found, tenant, fields] = await Promise.all([
+      must(
+        prisma.workOrder.findFirst({
+          where: { id: idOf(request), tenantId: id },
+          include: {
+            customer: true,
+            asset: { include: { location: true } },
+            assignee: { select: { name: true } },
+            attachments: true,
+            checklistRuns: { include: { template: { select: { name: true } } } },
+            stockMovements: { include: { part: true, location: true }, orderBy: { createdAt: "asc" } },
+          },
+        }),
+        "Intervento",
+      ),
+      prisma.tenant.findUnique({
+        where: { id },
+        include: { category: { select: { terminology: true } }, locations: { select: { address: true, city: true } } },
       }),
-      "Intervento",
-    );
-    const tenant = await prisma.tenant.findUnique({ where: { id } });
-    const pdf = await renderWorkOrderPdf(report, tenant?.name ?? "Bitora");
+      prisma.customFieldDef.findMany({ where: { tenantId: id, entity: "WORK_ORDER" }, orderBy: { label: "asc" } }),
+    ]);
+    const settings = (tenant?.settings ?? {}) as { terminology?: Partial<Terminology> };
+    const terms = mergeTerminology(recordOf(tenant?.category.terminology), settings.terminology);
+    const branding = (tenant?.branding ?? {}) as { accent?: string };
+    const place = tenant?.locations.length === 1 ? [tenant.locations[0]?.address, tenant.locations[0]?.city].filter(Boolean).join(", ") : "";
+    const pdf = await renderWorkOrderPdf(found, {
+      shopName: tenant?.name ?? "Bitora",
+      shopAddress: place || null,
+      accent: typeof branding.accent === "string" ? branding.accent : DEFAULT_ACCENT,
+      documentTitle: documentTitle(terms.workOrder),
+      labels: { customer: terms.customer, asset: terms.asset, spareParts: terms.spareParts, technician: "Tecnico" },
+      fields: fields.map((field) => ({ key: field.key, label: field.label, type: field.type })),
+    });
+    const stamp = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Rome" });
+    const short = found.id.replace(/[^a-z0-9]/gi, "").slice(-6).toLowerCase();
     reply.header("Content-Type", "application/pdf");
-    reply.header("Content-Disposition", `inline; filename="rapportino-${report.id}.pdf"`);
+    reply.header("Content-Disposition", `inline; filename="rapportino-${stamp}-${short}.pdf"`);
     return reply.send(pdf);
   });
 
@@ -303,10 +348,20 @@ export async function coreRoutes(app: FastifyInstance) {
     return tenantDb(tenantId(request)).schedule.findMany({ include: { asset: true, template: true }, orderBy: { dueAt: "asc" }, take: 200 });
   });
 
+  app.get("/agenda", { preHandler: [app.requireTenant, permit("schedules.read")] }, async (request) => {
+    const query = request.query as { from?: string; to?: string };
+    const from = query.from ? new Date(query.from) : new Date();
+    const to = query.to ? new Date(query.to) : new Date(from.getTime() + 7 * 86_400_000);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) throw new HttpError(400, "Intervallo di date non valido");
+    if (to.getTime() - from.getTime() > 62 * 86_400_000) throw new HttpError(400, "Chiedi al massimo due mesi alla volta");
+    return agenda(tenantId(request), from, to, { schedules: true, workOrders: request.auth!.permissions.includes("work_orders.read") });
+  });
+
   app.post("/schedules", { preHandler: [app.requireTenant, permit("schedules.write"), moduleGuard("calendar")] }, async (request) => {
     const body = parseBody(scheduleSchema, request.body);
     const id = tenantId(request);
-    return tenantDb(id).schedule.create({
+    const minutes = body.durationMinutes ?? slotMinutes((await categoryOfTenant(id)).vocab.scheduleKinds, body.kind);
+    const created = await tenantDb(id).schedule.create({
       data: {
         tenantId: id,
         assetId: body.assetId || null,
@@ -314,16 +369,20 @@ export async function coreRoutes(app: FastifyInstance) {
         kind: body.kind,
         title: body.title,
         dueAt: new Date(body.dueAt),
+        durationMinutes: minutes,
         intervalMonths: body.intervalMonths ?? null,
       },
     });
+    const overlaps = await overlapsFor(id, { id: created.id, assetId: created.assetId, start: created.dueAt, minutes });
+    return { ...created, overlaps };
   });
 
   app.patch("/schedules/:id", { preHandler: [app.requireTenant, permit("schedules.write"), moduleGuard("calendar")] }, async (request) => {
     const body = parseBody(scheduleSchema.partial(), request.body);
-    const db = tenantDb(tenantId(request));
+    const id = tenantId(request);
+    const db = tenantDb(id);
     await must(db.schedule.findFirst({ where: { id: idOf(request) } }), "Scadenza");
-    return db.schedule.update({
+    const updated = await db.schedule.update({
       where: { id: idOf(request) },
       data: {
         ...(body.assetId !== undefined ? { assetId: body.assetId || null } : {}),
@@ -331,9 +390,13 @@ export async function coreRoutes(app: FastifyInstance) {
         ...(body.kind !== undefined ? { kind: body.kind } : {}),
         ...(body.title !== undefined ? { title: body.title } : {}),
         ...(body.dueAt !== undefined ? { dueAt: new Date(body.dueAt) } : {}),
+        ...(body.durationMinutes !== undefined ? { durationMinutes: body.durationMinutes } : {}),
         ...(body.intervalMonths !== undefined ? { intervalMonths: body.intervalMonths } : {}),
       },
     });
+    const minutes = updated.durationMinutes ?? slotMinutes((await categoryOfTenant(id)).vocab.scheduleKinds, updated.kind);
+    const overlaps = await overlapsFor(id, { id: updated.id, assetId: updated.assetId, start: updated.dueAt, minutes });
+    return { ...updated, overlaps };
   });
 
   app.delete("/schedules/:id", { preHandler: [app.requireTenant, permit("schedules.write"), moduleGuard("calendar")] }, async (request) => {

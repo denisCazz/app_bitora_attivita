@@ -12,12 +12,20 @@ import {
 } from "@rapportini/shared";
 import type { FastifyInstance } from "fastify";
 import { blankToNull, HttpError, must, num, parseBody } from "../errors";
+import { categoryOfTenant } from "../lib/catalog";
 import { prisma, tenantDb } from "../lib/prisma";
 import { tenantId } from "../plugins/auth";
 import { moduleGuard, permit } from "../plugins/guards";
 
 function idOf(request: { params: unknown }): string {
   return (request.params as { id: string }).id;
+}
+
+async function stationFor(tenant: string, requested: string | undefined): Promise<string> {
+  const { stations } = (await categoryOfTenant(tenant)).vocab;
+  if (!requested) return stations[0]!.key;
+  if (!stations.some((station) => station.key === requested)) throw new HttpError(400, "Reparto non valido");
+  return requested;
 }
 
 export async function hospitalityRoutes(app: FastifyInstance) {
@@ -59,8 +67,9 @@ export async function hospitalityRoutes(app: FastifyInstance) {
   app.post("/menu-items", { preHandler: [app.requireTenant, permit("menu.write"), moduleGuard("menu")] }, async (request) => {
     const body = parseBody(menuItemSchema, request.body);
     const id = tenantId(request);
+    const station = await stationFor(id, body.station);
     const item = await tenantDb(id).menuItem.create({
-      data: { tenantId: id, name: body.name, category: body.category, station: body.station ?? "KITCHEN", price: body.price, available: body.available ?? true, customFields: body.customFields ?? {} },
+      data: { tenantId: id, name: body.name, category: body.category, station, price: body.price, available: body.available ?? true, customFields: body.customFields ?? {} },
     });
     if (body.modifierIds?.length) {
       await tenantDb(id).menuItemModifier.createMany({
@@ -72,9 +81,30 @@ export async function hospitalityRoutes(app: FastifyInstance) {
 
   app.patch("/menu-items/:id", { preHandler: [app.requireTenant, permit("menu.write"), moduleGuard("menu")] }, async (request) => {
     const body = parseBody(menuItemSchema.partial(), request.body);
+    const id = tenantId(request);
+    const itemId = idOf(request);
+    const db = tenantDb(id);
+    await must(db.menuItem.findFirst({ where: { id: itemId } }), "Piatto");
+    const station = body.station === undefined ? undefined : await stationFor(id, body.station);
+    if (body.modifierIds) {
+      const modifierIds = [...new Set(body.modifierIds)];
+      const found = await db.modifier.findMany({ where: { id: { in: modifierIds } }, select: { id: true } });
+      if (found.length !== modifierIds.length) throw new HttpError(400, "Variante non trovata");
+      await db.menuItemModifier.deleteMany({ where: { menuItemId: itemId } });
+      if (modifierIds.length) {
+        await db.menuItemModifier.createMany({ data: modifierIds.map((modifierId) => ({ tenantId: id, menuItemId: itemId, modifierId })) });
+      }
+    }
+    return db.menuItem.update({ where: { id: itemId }, data: { name: body.name, category: body.category, station, price: body.price, available: body.available, customFields: body.customFields } });
+  });
+
+  app.delete("/menu-items/:id", { preHandler: [app.requireTenant, permit("menu.write"), moduleGuard("menu")] }, async (request) => {
+    const itemId = idOf(request);
     const db = tenantDb(tenantId(request));
-    await must(db.menuItem.findFirst({ where: { id: idOf(request) } }), "Piatto");
-    return db.menuItem.update({ where: { id: idOf(request) }, data: { name: body.name, category: body.category, station: body.station, price: body.price, available: body.available, customFields: body.customFields } });
+    await must(db.menuItem.findFirst({ where: { id: itemId } }), "Piatto");
+    await db.orderLine.updateMany({ where: { menuItemId: itemId }, data: { menuItemId: null } });
+    await db.menuItem.delete({ where: { id: itemId } });
+    return { ok: true };
   });
 
   app.get("/modifiers", { preHandler: [app.requireTenant, permit("menu.read"), moduleGuard("menu")] }, async (request) => {
@@ -117,7 +147,7 @@ export async function hospitalityRoutes(app: FastifyInstance) {
     const order = await must(db.order.findFirst({ where: { id: idOf(request) } }), "Comanda");
     if (order.status === "CLOSED" || order.status === "VOID") throw new HttpError(409, "Comanda chiusa");
     let name = body.name?.trim() ?? "";
-    let station: "BAR" | "KITCHEN" | "OTHER" = body.station ?? "KITCHEN";
+    let station = await stationFor(id, body.station);
     let unitPrice = body.unitPrice ?? 0;
     let modifiers: Array<{ id: string; name: string; priceDelta: number }> = [];
     let menuItemId: string | null = null;
@@ -173,7 +203,9 @@ export async function hospitalityRoutes(app: FastifyInstance) {
     const total = order.lines.filter((line) => line.status !== "VOID").reduce((sum, line) => sum + num(line.unitPrice) * line.quantity, 0);
     const paid = body.payments.reduce((sum, payment) => sum + payment.amount, 0);
     if (Math.abs(paid - total) > 0.05) throw new HttpError(400, `Il conto è ${total.toFixed(2)} €, ricevuto ${paid.toFixed(2)} €`);
-    const kitchen = await prisma.stockLocation.findFirst({ where: { tenantId: id, kind: "KITCHEN" } });
+    const kitchen =
+      (await prisma.stockLocation.findFirst({ where: { tenantId: id, kind: "POINT" }, orderBy: { createdAt: "asc" } })) ??
+      (await prisma.stockLocation.findFirst({ where: { tenantId: id }, orderBy: { createdAt: "asc" } }));
     await prisma.$transaction(async (tx) => {
       if (kitchen) {
         for (const line of order.lines) {

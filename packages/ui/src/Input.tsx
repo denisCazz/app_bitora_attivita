@@ -3,7 +3,7 @@ import { TextInput, View, type TextInputProps } from "react-native";
 import { Text } from "./Text";
 import { useTheme } from "./theme";
 
-export function Input({ label, error, onFocus, onBlur, ...props }: TextInputProps & { label: string; error?: string }) {
+export function Input({ label, error, onFocus, onBlur, multiline, ...props }: TextInputProps & { label: string; error?: string }) {
   const theme = useTheme();
   const [focused, setFocused] = useState(false);
   return (
@@ -21,15 +21,18 @@ export function Input({ label, error, onFocus, onBlur, ...props }: TextInputProp
           setFocused(false);
           onBlur?.(event);
         }}
+        multiline={multiline}
         {...props}
         style={{
-          minHeight: 54,
+          minHeight: multiline ? 120 : 54,
           borderRadius: theme.radius.md,
           borderWidth: focused ? 1.5 : 1,
           borderColor: error ? theme.colors.danger : focused ? theme.colors.accent : theme.colors.glassBorder,
           backgroundColor: theme.colors.field,
           color: theme.colors.ink,
           paddingHorizontal: 16,
+          paddingVertical: multiline ? 12 : 0,
+          textAlignVertical: multiline ? "top" : "center",
           fontSize: 16,
         }}
       />

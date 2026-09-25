@@ -7,6 +7,7 @@ import { HttpError } from "./errors";
 import { uploadDirectory } from "./lib/storage";
 import { authPlugin } from "./plugins/auth";
 import { adminRoutes } from "./routes/admin";
+import { assistantRoutes } from "./routes/assistant";
 import { authRoutes } from "./routes/auth";
 import { billingRoutes } from "./routes/billing";
 import { coreRoutes } from "./routes/core";
@@ -31,7 +32,7 @@ export async function buildApp() {
           : 500;
     const message = error instanceof Error ? error.message : "Errore";
     if (status >= 500) request.log.error(error);
-    reply.code(status).send({ error: status >= 500 ? "Errore interno" : message });
+    reply.code(status).send({ error: status >= 500 && !(error instanceof HttpError) ? "Errore interno" : message });
   });
   app.get("/health", async () => ({ ok: true }));
   await authPlugin(app);
@@ -43,5 +44,6 @@ export async function buildApp() {
   await app.register(settingsRoutes);
   await app.register(billingRoutes);
   await app.register(adminRoutes);
+  await app.register(assistantRoutes);
   return app;
 }

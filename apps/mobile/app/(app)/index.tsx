@@ -9,6 +9,7 @@ import { http } from "../../src/api/client";
 import { monthly, useLockedModules } from "../../src/billing";
 import { QueryState } from "../../src/components/States";
 import { when } from "../../src/format";
+import { useNotices } from "../../src/notices";
 import { useManifest } from "../../src/session";
 
 interface Dashboard {
@@ -30,30 +31,64 @@ export default function HomeScreen() {
   const manifest = useManifest();
   const router = useRouter();
   const terms = manifest.data?.tenant.terminology;
-  const vertical = manifest.data?.tenant.vertical;
-  const usable = (key: string) => manifest.data?.modules.some((module) => module.key === key && isUsable(module.status)) ?? false;
-  const offer = useLockedModules().find((module) => module.status === "locked");
+  const moduleOf = (key: string) => manifest.data?.modules.find((module) => module.key === key);
+  const usable = (key: string) => {
+    const module = moduleOf(key);
+    return module ? isUsable(module.status) : false;
+  };
+  const offer = useLockedModules().find((module) => module.status === "locked" && module.recommended);
   const dashboard = useQuery({ queryKey: ["dashboard"], queryFn: () => http.get<Dashboard>("/dashboard"), enabled: Boolean(manifest.data) });
+  const notices = useNotices(Boolean(manifest.data));
+  const unread = (notices.data ?? []).filter((notice) => !notice.readAt).length;
 
-  const stats =
-    vertical === "HOSPITALITY"
-      ? [
-          { label: "Comande aperte", value: dashboard.data?.openOrders ?? 0, icon: "receipt-outline", show: usable("orders") },
-          { label: `${terms?.workOrders ?? "Interventi"} aperti`, value: dashboard.data?.openWorkOrders ?? 0, icon: "construct-outline", show: usable("work_orders") },
-        ]
-      : [
-          { label: `${terms?.workOrders ?? "Interventi"} aperti`, value: dashboard.data?.openWorkOrders ?? 0, icon: "construct-outline", show: usable("work_orders") },
-          { label: "Ricambi bassi", value: dashboard.data?.lowStock ?? 0, icon: "cube-outline", show: usable("spare_parts") },
-        ];
+  const available: Record<string, { module: string; label: string; value: number; icon: string }> = {
+    openWorkOrders: { module: "work_orders", label: `${terms?.workOrders ?? moduleOf("work_orders")?.label ?? ""} in corso`, value: dashboard.data?.openWorkOrders ?? 0, icon: "construct-outline" },
+    openOrders: { module: "orders", label: `${moduleOf("orders")?.label ?? ""} in corso`, value: dashboard.data?.openOrders ?? 0, icon: "receipt-outline" },
+    lowStock: { module: "spare_parts", label: `${terms?.spareParts ?? moduleOf("spare_parts")?.label ?? ""} sotto scorta`, value: dashboard.data?.lowStock ?? 0, icon: "cube-outline" },
+  };
+  const configured = manifest.data?.tenant.vocab.dashboard ?? [];
+  const order = [...configured, ...Object.keys(available).filter((key) => !configured.includes(key))];
+  const stats = order
+    .flatMap((key) => (available[key] ? [{ key, ...available[key] }] : []))
+    .filter((stat) => usable(stat.module))
+    .slice(0, 2);
 
   return (
     <Screen>
       <View style={{ borderRadius: theme.radius.xl, overflow: "hidden", padding: 22, gap: 6, marginTop: 4 }}>
         <LinearGradient colors={[theme.colors.accent, theme.colors.accentAlt]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
         <LinearGradient colors={["rgba(255,255,255,0.25)", "rgba(255,255,255,0)"]} end={{ x: 0.2, y: 0.8 }} style={StyleSheet.absoluteFill} />
-        <Text variant="caption" style={{ color: "rgba(255,255,255,0.85)", fontWeight: "700" }}>
-          {manifest.data?.tenant.name} · {manifest.data?.role.name}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <Text variant="caption" style={{ color: "rgba(255,255,255,0.85)", fontWeight: "700", flex: 1 }}>
+            {manifest.data?.tenant.name} · {manifest.data?.role.name}
+          </Text>
+          <Pressy
+            accessibilityRole="button"
+            accessibilityLabel={unread ? `${unread} notifiche da leggere` : "Notifiche"}
+            onPress={() => router.push("/(app)/notifications")}
+            style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center" }}
+          >
+            <Ionicons name={unread ? "notifications" : "notifications-outline"} size={20} color="#fff" />
+            {unread ? (
+              <View
+                style={{
+                  position: "absolute",
+                  top: 2,
+                  right: 2,
+                  minWidth: 16,
+                  height: 16,
+                  borderRadius: 8,
+                  paddingHorizontal: 3,
+                  backgroundColor: "#fff",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text style={{ color: "#111", fontSize: 10, lineHeight: 12, fontWeight: "800" }}>{unread > 9 ? "9+" : unread}</Text>
+              </View>
+            ) : null}
+          </Pressy>
+        </View>
         <Text variant="display" style={{ color: "#fff" }}>
           {greeting()}, {manifest.data?.user.name.split(" ")[0]}
         </Text>
@@ -88,10 +123,8 @@ export default function HomeScreen() {
 
       <QueryState isLoading={dashboard.isLoading} error={dashboard.error} refetch={() => dashboard.refetch()}>
         <View style={{ flexDirection: "row", gap: 12 }}>
-          {stats
-            .filter((stat) => stat.show)
-            .map((stat) => (
-              <Card key={stat.label} style={{ flex: 1, gap: 6 }}>
+          {stats.map((stat) => (
+              <Card key={stat.key} style={{ flex: 1, gap: 6 }}>
                 <Ionicons name={stat.icon as keyof typeof Ionicons.glyphMap} size={20} color={theme.colors.accent} />
                 <Text variant="display">{stat.value}</Text>
                 <Text variant="caption" muted>

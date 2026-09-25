@@ -144,7 +144,7 @@ export default function WorkOrderScreen() {
     const asset = result.assets[0];
     const form = new FormData();
     form.append("workOrderId", id);
-    form.append("file", { uri: asset.uri, name: "foto.jpg", type: "image/jpeg" } as unknown as Blob);
+    form.append("file", new File(asset.uri) as unknown as Blob, "foto.jpg");
     await fetch(`${API_URL}/attachments`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form });
     await refresh();
   }

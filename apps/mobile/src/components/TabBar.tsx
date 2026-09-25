@@ -35,50 +35,71 @@ export function TabBar({ items }: { items: NavItem[] }) {
 
   const indicator = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
 
-  if (items.length === 0) return null;
+  if (items.length === 0 || pathname.startsWith("/assistant")) return null;
 
   return (
     <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: Math.max(insets.bottom - 6, 12), alignItems: "center" }}>
-      <Glass
-        intensity={70}
-        rounded={30}
-        style={{
-          width: "92%",
-          maxWidth: 520,
-          shadowColor: "#000",
-          shadowOpacity: theme.dark ? 0.5 : 0.12,
-          shadowRadius: 24,
-          shadowOffset: { width: 0, height: 12 },
-        }}
-      >
-        <View style={{ flexDirection: "row", padding: 6 }} onLayout={(event) => setWidth(event.nativeEvent.layout.width - 12)}>
-          {slot > 0 ? (
-            <Animated.View style={[{ position: "absolute", top: 6, bottom: 6, left: 6, width: slot, borderRadius: 24, overflow: "hidden" }, indicator]}>
-              <LinearGradient colors={[theme.colors.accent, theme.colors.accentAlt]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
-            </Animated.View>
-          ) : null}
-          {items.map((item, index) => {
-            const active = index === activeIndex;
-            const color = active ? theme.colors.accentInk : theme.colors.inkSoft;
-            return (
-              <Pressy
-                key={item.key}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={item.label}
-                scaleTo={0.9}
-                onPress={() => router.navigate(hrefFor(item) as never)}
-                style={{ flex: 1, alignItems: "center", gap: 2, paddingVertical: 9 }}
-              >
-                <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={21} color={color} />
-                <Text variant="caption" numberOfLines={1} style={{ color, fontWeight: "700", fontSize: 11, lineHeight: 14 }}>
-                  {item.label}
-                </Text>
-              </Pressy>
-            );
-          })}
-        </View>
-      </Glass>
+      <View pointerEvents="box-none" style={{ width: "92%", maxWidth: 580, flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <Glass
+          intensity={70}
+          rounded={30}
+          style={{
+            flex: 1,
+            shadowColor: "#000",
+            shadowOpacity: theme.dark ? 0.5 : 0.12,
+            shadowRadius: 24,
+            shadowOffset: { width: 0, height: 12 },
+          }}
+        >
+          <View style={{ flexDirection: "row", padding: 6 }} onLayout={(event) => setWidth(event.nativeEvent.layout.width - 12)}>
+            {slot > 0 ? (
+              <Animated.View style={[{ position: "absolute", top: 6, bottom: 6, left: 6, width: slot, borderRadius: 24, overflow: "hidden" }, indicator]}>
+                <LinearGradient colors={[theme.colors.accent, theme.colors.accentAlt]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+              </Animated.View>
+            ) : null}
+            {items.map((item, index) => {
+              const active = index === activeIndex;
+              const color = active ? theme.colors.accentInk : theme.colors.inkSoft;
+              return (
+                <Pressy
+                  key={item.key}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={item.label}
+                  scaleTo={0.9}
+                  onPress={() => router.navigate(hrefFor(item) as never)}
+                  style={{ flex: 1, alignItems: "center", gap: 2, paddingVertical: 9 }}
+                >
+                  <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={21} color={color} />
+                  <Text variant="caption" numberOfLines={1} style={{ color, fontWeight: "700", fontSize: 11, lineHeight: 14 }}>
+                    {item.label}
+                  </Text>
+                </Pressy>
+              );
+            })}
+          </View>
+        </Glass>
+        <Pressy
+          accessibilityRole="button"
+          accessibilityLabel="Assistente"
+          scaleTo={0.9}
+          onPress={() => router.push("/(app)/assistant" as never)}
+          style={{
+            width: 62,
+            height: 62,
+            borderRadius: 31,
+            shadowColor: theme.colors.accent,
+            shadowOpacity: 0.45,
+            shadowRadius: 18,
+            shadowOffset: { width: 0, height: 10 },
+          }}
+        >
+          <View style={{ flex: 1, borderRadius: 31, overflow: "hidden", alignItems: "center", justifyContent: "center" }}>
+            <LinearGradient colors={[theme.colors.accent, theme.colors.accentAlt]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+            <Ionicons name="sparkles" size={26} color={theme.colors.accentInk} />
+          </View>
+        </Pressy>
+      </View>
     </View>
   );
 }

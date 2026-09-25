@@ -1,6 +1,8 @@
-import type { CatalogModule, CategoryPresets, ResolvedCategory } from "./catalog";
-import type { ModuleKey, Vertical } from "./modules";
+import { GENERIC_CATEGORY_KEY, needsFromModules, overlayVocab, type TenantActivityPresets } from "./activity";
+import { scoreModules, type CatalogModule, type CategoryPresets, type NeedView, type ResolvedCategory, type Vocab } from "./catalog";
+import type { ModuleKey } from "./modules";
 import { hasPermission, type Permission } from "./permissions";
+import { EXTRA_SEAT_CENTS, INCLUDED_SEATS, seatMonthlyCents } from "./seats";
 import { mergeTerminology, type Terminology } from "./verticals";
 
 export interface Branding {
@@ -31,21 +33,26 @@ export interface Manifest {
   tenant: {
     id: string;
     name: string;
-    vertical: Vertical;
     category: { id: string; key: string; label: string; path: string[]; image: string | null };
     branding: Branding;
     terminology: Terminology;
     assetTypes: string[];
+    vocab: Vocab;
+    needs: string[];
   };
   memberships: Array<{
     tenantId: string;
     tenantName: string;
-    vertical: Vertical;
     roleName: string;
   }>;
   role: { id: string; name: string; permissions: string[] };
   modules: ManifestModule[];
-  plan: { paidModules: number; monthlyCents: number };
+  needs: NeedView[];
+  plan: {
+    paidModules: number;
+    monthlyCents: number;
+    seats: { included: number; extra: number; priceCents: number };
+  };
   navigation: NavItem[];
   customFields: CustomFieldDTO[];
 }
@@ -56,6 +63,9 @@ export interface ManifestModule {
   key: ModuleKey;
   status: ModuleStatus;
   free: boolean;
+  recommended: boolean;
+  score: number;
+  requires: ModuleKey[];
   priceCents: number;
   trialDays: number;
   pitch: string;
@@ -100,21 +110,41 @@ export function buildNavigation(modules: readonly CatalogModule[], permissions: 
 
 export function buildManifest(input: {
   user: Manifest["user"];
-  tenant: { id: string; name: string; branding: Partial<Branding>; terminology?: Partial<Terminology> | null };
+  tenant: {
+    id: string;
+    name: string;
+    branding: Partial<Branding>;
+    terminology?: Partial<Terminology> | null;
+    needs?: readonly string[];
+    activity?: string | null;
+    presets?: TenantActivityPresets | null;
+  };
   category: ResolvedCategory;
   memberships: Manifest["memberships"];
   role: Manifest["role"];
   moduleStates: readonly ModuleState[];
   customFields: CustomFieldDTO[];
+  extraSeats?: number;
   now?: Date;
 }): Manifest {
   const { category } = input;
+  const needs = [...(input.tenant.needs ?? [])];
+  const scoredNeeds = category.key === GENERIC_CATEGORY_KEY ? needsFromModules(needs) : category.needs;
+  const scores = scoreModules(category.modules, scoredNeeds, needs);
+  const terminology = mergeTerminology(category.terminology, input.tenant.terminology);
+  const activity = input.tenant.activity?.trim();
+  const path = category.path.map((node) => node.label);
+  if (activity) path[path.length - 1] = activity;
   const modules: ManifestModule[] = category.modules.map((definition) => {
     const state = input.moduleStates.find((row) => row.key === definition.key);
+    const score = scores.get(definition.key) ?? 0;
     return {
       key: definition.key,
       status: moduleStatus(definition.free, state, input.now),
       free: definition.free,
+      recommended: score > 0,
+      score,
+      requires: definition.requires,
       priceCents: definition.priceCents,
       trialDays: definition.trialDays,
       pitch: definition.pitch,
@@ -127,24 +157,45 @@ export function buildManifest(input: {
   });
   const usable = category.modules.filter((definition) => isUsable(modules.find((module) => module.key === definition.key)!.status));
   const paid = modules.filter((module) => !module.free && input.moduleStates.find((row) => row.key === module.key)?.licensed);
+  const extraSeats = Math.max(0, input.extraSeats ?? 0);
+  const generic = category.key === GENERIC_CATEGORY_KEY;
+  const navigation = buildNavigation(usable, input.role.permissions).map((item) => ({
+    ...item,
+    label: generic ? genericNavLabel(item.key, item.label, terminology) : item.label,
+  }));
   return {
     user: input.user,
     tenant: {
       id: input.tenant.id,
       name: input.tenant.name,
-      vertical: category.family,
-      category: { id: category.id, key: category.key, label: category.label, path: category.path.map((node) => node.label), image: category.image },
+      category: { id: category.id, key: category.key, label: activity || category.label, path, image: category.image },
       branding: { accent: input.tenant.branding.accent ?? category.accent, logoUrl: input.tenant.branding.logoUrl ?? null },
-      terminology: mergeTerminology(category.terminology, input.tenant.terminology),
-      assetTypes: category.presets.assetTypes ?? [],
+      terminology,
+      assetTypes: input.tenant.presets?.assetTypes?.length ? input.tenant.presets.assetTypes : (category.presets.assetTypes ?? []),
+      vocab: overlayVocab(category.vocab, input.tenant.presets),
+      needs,
     },
     memberships: input.memberships,
     role: input.role,
     modules,
-    plan: { paidModules: paid.length, monthlyCents: paid.reduce((sum, module) => sum + module.priceCents, 0) },
-    navigation: buildNavigation(usable, input.role.permissions),
+    needs: category.needs,
+    plan: {
+      paidModules: paid.length,
+      monthlyCents: paid.reduce((sum, module) => sum + module.priceCents, 0) + seatMonthlyCents(extraSeats),
+      seats: { included: INCLUDED_SEATS, extra: extraSeats, priceCents: EXTRA_SEAT_CENTS },
+    },
+    navigation,
     customFields: input.customFields,
   };
+}
+
+function genericNavLabel(key: string, label: string, terminology: Terminology): string {
+  if (key === "work_orders") return terminology.workOrders;
+  if (key === "assets") return terminology.assets;
+  if (key === "customers") return terminology.customers;
+  if (key === "spare_parts") return terminology.spareParts;
+  if (key === "stock") return terminology.warehouse;
+  return label;
 }
 
 export function assertPermission(permissions: readonly string[], required: Permission): void {

@@ -1,7 +1,7 @@
-import { scheduleSchema } from "@rapportini/shared";
+import { scheduleSchema, slotMinutes } from "@rapportini/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { View } from "react-native";
+import { Alert, View } from "react-native";
 import { Badge, Button, Card, EmptyState, Fab, Input, Screen, Sheet, Text } from "@rapportini/ui";
 import { http } from "../../src/api/client";
 import { queryClient } from "../../src/api/query";
@@ -9,23 +9,13 @@ import { Chip } from "../../src/components/Chip";
 import { RecordPicker } from "../../src/components/RecordPicker";
 import { QueryState } from "../../src/components/States";
 import { fromLocalInput, toLocalInput, when } from "../../src/format";
-import { useCanUse, useManifest } from "../../src/session";
-
-const KINDS = [
-  ["ANNUAL_CLEANING", "Pulizia"],
-  ["FLUE_CHECK", "Fumi"],
-  ["HACCP", "HACCP"],
-  ["GENERIC", "Generico"],
-] as const;
-
-type Kind = (typeof KINDS)[number][0];
-
-const KIND_LABEL: Record<string, string> = Object.fromEntries(KINDS);
+import { useCanUse, useManifest, useVocab, vocabLabel } from "../../src/session";
 
 interface ScheduleItem {
   id: string;
   title: string;
   dueAt: string;
+  durationMinutes?: number | null;
   kind: string;
   intervalMonths?: number | null;
   asset?: { id: string; name: string } | null;
@@ -35,20 +25,33 @@ interface Draft {
   id?: string;
   title: string;
   dueAt: string;
+  minutes: string;
   interval: string;
-  kind: "" | Kind;
+  kind: string;
   assetId: string | null;
   assetName: string;
 }
 
-const blank = (): Draft => ({ title: "", dueAt: "", interval: "", kind: "", assetId: null, assetName: "" });
-
-function isKind(value: string): value is Kind {
-  return KINDS.some(([kind]) => kind === value);
+interface Overlap {
+  title: string;
+  start: string;
+  end: string;
 }
+
+function clock(value: string) {
+  return new Date(value).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+}
+
+function slotLabel(dueAt: string, minutes: number) {
+  const end = new Date(new Date(dueAt).getTime() + minutes * 60_000).toISOString();
+  return `${when(dueAt)}–${clock(end)}`;
+}
+
+const blank = (): Draft => ({ title: "", dueAt: "", minutes: "", interval: "", kind: "", assetId: null, assetName: "" });
 
 export default function CalendarScreen() {
   const manifest = useManifest();
+  const { scheduleKinds } = useVocab();
   const assetsOn = useCanUse("assets");
   const [assetQ, setAssetQ] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -67,17 +70,26 @@ export default function CalendarScreen() {
       const dueAt = fromLocalInput(draft.dueAt);
       if (!draft.kind) throw new Error("Scegli il tipo");
       if (!dueAt) throw new Error("Scrivi la data, per esempio 2026-09-26T09:00");
+      const minutes = draft.minutes.trim() ? Number(draft.minutes) : null;
+      if (minutes !== null && !(Number.isInteger(minutes) && minutes >= 5 && minutes <= 720)) throw new Error("La durata va da 5 a 720 minuti");
       const body = scheduleSchema.parse({
         assetId: draft.assetId,
         kind: draft.kind,
         title: draft.title,
         dueAt,
+        durationMinutes: minutes ?? (draft.id ? null : undefined),
         intervalMonths: draft.interval.trim() ? Number(draft.interval) : null,
       });
-      return draft.id ? http.patch(`/schedules/${draft.id}`, body) : http.post("/schedules", body);
+      return draft.id ? http.patch<{ overlaps?: Overlap[] }>(`/schedules/${draft.id}`, body) : http.post<{ overlaps?: Overlap[] }>("/schedules", body);
     },
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
       setDraft(null);
+      if (saved.overlaps?.length) {
+        Alert.alert(
+          "Salvato, ma si sovrappone",
+          saved.overlaps.map((item) => `${item.title} · ${clock(item.start)}–${clock(item.end)}`).join("\n"),
+        );
+      }
       await queryClient.invalidateQueries({ queryKey: ["schedules"] });
       await queryClient.invalidateQueries({ queryKey: ["asset"] });
     },
@@ -106,8 +118,9 @@ export default function CalendarScreen() {
       id: item.id,
       title: item.title,
       dueAt: toLocalInput(item.dueAt),
+      minutes: item.durationMinutes ? String(item.durationMinutes) : "",
       interval: item.intervalMonths ? String(item.intervalMonths) : "",
-      kind: isKind(item.kind) ? item.kind : "",
+      kind: item.kind,
       assetId: item.asset?.id ?? null,
       assetName: item.asset?.name ?? "",
     });
@@ -125,10 +138,10 @@ export default function CalendarScreen() {
         {query.data?.length ? (
           query.data.map((item) => (
             <Card key={item.id} style={{ gap: 8 }}>
-              <Badge label={KIND_LABEL[item.kind] ?? item.kind} tone={item.kind === "HACCP" ? "warning" : "accent"} />
+              <Badge label={vocabLabel(scheduleKinds, item.kind)} tone={scheduleKinds.find((kind) => kind.key === item.kind)?.tone ?? "accent"} />
               <Text variant="heading">{item.title}</Text>
               <Text muted>
-                {[item.asset?.name, when(item.dueAt), item.intervalMonths ? `ogni ${item.intervalMonths} mesi` : null].filter(Boolean).join(" · ")}
+                {[item.asset?.name, slotLabel(item.dueAt, item.durationMinutes ?? slotMinutes(scheduleKinds, item.kind)), item.intervalMonths ? `ogni ${item.intervalMonths} mesi` : null].filter(Boolean).join(" · ")}
               </Text>
               <Button label="Modifica" tone="secondary" onPress={() => openEdit(item)} />
             </Card>
@@ -150,18 +163,25 @@ export default function CalendarScreen() {
         <Input label="Titolo" value={draft?.title ?? ""} onChangeText={(title) => setDraft((current) => (current ? { ...current, title } : current))} />
         <Input label="Quando" value={draft?.dueAt ?? ""} onChangeText={(dueAt) => setDraft((current) => (current ? { ...current, dueAt } : current))} />
         <Input
+          label="Durata (minuti)"
+          keyboardType="number-pad"
+          placeholder={draft?.kind ? `${slotMinutes(scheduleKinds, draft.kind)} predefiniti` : "Predefinita in base al tipo"}
+          value={draft?.minutes ?? ""}
+          onChangeText={(minutes) => setDraft((current) => (current ? { ...current, minutes } : current))}
+        />
+        <Input
           label="Ogni quanti mesi"
           keyboardType="number-pad"
           value={draft?.interval ?? ""}
           onChangeText={(interval) => setDraft((current) => (current ? { ...current, interval } : current))}
         />
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          {KINDS.map(([kind, label]) => (
+          {scheduleKinds.map(({ key, label }) => (
             <Chip
-              key={kind}
+              key={key}
               label={label}
-              active={draft?.kind === kind}
-              onPress={() => setDraft((current) => (current ? { ...current, kind: current.kind === kind ? "" : kind } : current))}
+              active={draft?.kind === key}
+              onPress={() => setDraft((current) => (current ? { ...current, kind: current.kind === key ? "" : key } : current))}
             />
           ))}
         </View>

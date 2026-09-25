@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { categoryChain, resolveCategory, type CategoryNode, type ModuleDefRow } from "./catalog";
+import { categoryChain, planModules, resolveCategory, scoreModules, type CategoryNode, type ModuleDefRow, type NeedRow } from "./catalog";
 import { buildManifest, buildNavigation, moduleStatus } from "./manifest";
 import { MODULE_KEYS } from "./modules";
 import { PERMISSIONS } from "./permissions";
@@ -14,6 +14,7 @@ const defs: ModuleDefRow[] = MODULE_KEYS.map((key, index) => ({
   icon: "grid-outline",
   priceCents: key === "dashboard" || key === "settings" ? 0 : 900,
   trialDays: 14,
+  requires: key === "orders" || key === "inventory" ? ["menu"] : key === "floor" ? ["orders"] : [],
   sortOrder: index,
   active: true,
 }));
@@ -21,7 +22,6 @@ const defs: ModuleDefRow[] = MODULE_KEYS.map((key, index) => ({
 function node(partial: Partial<CategoryNode> & Pick<CategoryNode, "id" | "key">): CategoryNode {
   return {
     parentId: null,
-    family: "FIELD_SERVICE",
     label: partial.key,
     description: "",
     icon: "construct-outline",
@@ -40,6 +40,7 @@ function node(partial: Partial<CategoryNode> & Pick<CategoryNode, "id" | "key">)
 const row = (moduleKey: string, extra: Partial<CategoryNode["modules"][number]> = {}) => ({
   moduleKey,
   included: true,
+  recommended: null,
   free: null,
   tab: null,
   sortOrder: null,
@@ -53,7 +54,11 @@ const fieldService = node({
   key: "field_service",
   accent: "#2F6FED",
   terminology: { asset: "Impianto", assets: "Impianti" },
-  presets: { customFields: [{ entity: "ASSET", key: "power", label: "Potenza", type: "NUMBER" }] },
+  presets: {
+    customFields: [{ entity: "ASSET", key: "power", label: "Potenza", type: "NUMBER" }],
+    scheduleKinds: [{ key: "GENERIC", label: "Manutenzione" }],
+    sample: { customer: { name: "Mario Rossi" }, workOrder: "Primo intervento" },
+  },
   modules: [
     row("dashboard", { free: true, tab: true, sortOrder: 0 }),
     row("work_orders", { free: true, tab: true, sortOrder: 1 }),
@@ -71,31 +76,74 @@ const stoves = node({
   parentId: "fs",
   accent: "#E25B2A",
   terminology: { asset: "Stufa", assets: "Stufe" },
-  presets: { customFields: [{ entity: "ASSET", key: "fuel", label: "Combustibile", type: "SELECT", options: ["Pellet"] }] },
-  modules: [row("assets", { label: "Stufe" }), row("calendar", { included: false })],
+  presets: {
+    customFields: [{ entity: "ASSET", key: "fuel", label: "Combustibile", type: "SELECT", options: ["Pellet"] }],
+    scheduleKinds: [{ key: "ANNUAL_CLEANING", label: "Pulizia annuale" }],
+    sample: { workOrder: "Pulizia annuale" },
+  },
+  modules: [row("assets", { label: "Stufe" }), row("calendar", { included: false }), row("shifts", { recommended: false })],
 });
 
-describe("resolveCategory", () => {
-  const resolved = resolveCategory(categoryChain([fieldService, stoves], "st"), defs);
+const needs: NeedRow[] = [
+  { id: "n1", key: "parts", categoryId: "fs", label: "Ricambi", description: "", icon: "cog", modules: ["spare_parts", "stock"], sortOrder: 0, active: true },
+  { id: "n2", key: "tables", categoryId: "other", label: "Tavoli", description: "", icon: "cog", modules: ["floor"], sortOrder: 0, active: true },
+  { id: "n3", key: "service", categoryId: null, label: "Servizio", description: "", icon: "cog", modules: ["floor"], sortOrder: 1, active: true },
+];
 
-  it("inherits modules from the parent and applies subcategory overrides", () => {
-    expect(resolved.modules.map((module) => module.key)).toEqual(["dashboard", "work_orders", "assets", "spare_parts", "settings"]);
+describe("resolveCategory", () => {
+  const resolved = resolveCategory(categoryChain([fieldService, stoves], "st"), defs, needs);
+
+  it("offers every module, recommends the category ones and hides excluded ones", () => {
+    const keys = resolved.modules.map((module) => module.key);
+    expect(keys.slice(0, 4)).toEqual(["dashboard", "work_orders", "assets", "spare_parts"]);
+    expect(keys).toContain("floor");
+    expect(keys).not.toContain("calendar");
     expect(resolved.modules.find((module) => module.key === "assets")?.label).toBe("Stufe");
     expect(resolved.modules.find((module) => module.key === "assets")?.tab).toBe(true);
+    expect(resolved.modules.find((module) => module.key === "spare_parts")?.recommended).toBe(true);
+    expect(resolved.modules.find((module) => module.key === "floor")?.recommended).toBe(false);
+    expect(resolved.modules.find((module) => module.key === "shifts")?.recommended).toBe(false);
   });
 
-  it("merges terminology, presets, accent and roles along the tree", () => {
+  it("merges terminology, presets, vocab, accent and roles along the tree", () => {
     expect(resolved.terminology.assets).toBe("Stufe");
     expect(resolved.terminology.workOrders).toBe("Interventi");
     expect(resolved.presets.customFields?.map((field) => field.key)).toEqual(["power", "fuel"]);
+    expect(resolved.presets.sample).toEqual({ customer: { name: "Mario Rossi" }, workOrder: "Pulizia annuale" });
+    expect(resolved.vocab.scheduleKinds.map((item) => item.key)).toEqual(["GENERIC", "ANNUAL_CLEANING"]);
+    expect(resolved.vocab.stations).toEqual([{ key: "MAIN", label: "Generale" }]);
     expect(resolved.accent).toBe("#E25B2A");
     expect(resolved.roles.map((role) => role.name)).toEqual(["Titolare"]);
     expect(resolved.path.map((item) => item.key)).toEqual(["field_service", "stoves"]);
   });
 
+  it("keeps needs of the branch and global ones, category first", () => {
+    expect(resolved.needs.map((need) => need.key)).toEqual(["parts", "service"]);
+  });
+
   it("drops modules disabled in the global catalog", () => {
     const off = defs.map((def) => (def.key === "spare_parts" ? { ...def, active: false } : def));
     expect(resolveCategory([fieldService], off).modules.some((module) => module.key === "spare_parts")).toBe(false);
+  });
+});
+
+describe("scoreModules", () => {
+  const resolved = resolveCategory(categoryChain([fieldService, stoves], "st"), defs, needs);
+
+  it("boosts modules of chosen needs and pulls in what they require", () => {
+    const score = scoreModules(resolved.modules, resolved.needs, ["service"]);
+    expect(score.get("floor")).toBe(3);
+    expect(score.get("orders")).toBe(3);
+    expect(score.get("menu")).toBe(3);
+    expect(score.get("spare_parts")).toBe(1);
+    expect(score.get("shifts")).toBe(0);
+  });
+
+  it("splits a plan into included, suggested and other modules", () => {
+    const plan = planModules(resolved.modules, resolved.needs, ["parts"]);
+    expect(plan.included.map((module) => module.key)).toEqual(["dashboard", "work_orders", "settings"]);
+    expect(plan.suggested.map((module) => module.key).slice(0, 2)).toEqual(["spare_parts", "stock"]);
+    expect(plan.others.some((module) => module.key === "floor")).toBe(true);
   });
 });
 
@@ -117,8 +165,8 @@ describe("buildManifest", () => {
   it("shows only the free base plan in the navigation of a new shop", () => {
     const manifest = buildManifest({
       user: { id: "u", name: "Marco", email: "m@x.it", platformAdmin: false },
-      tenant: { id: "t", name: "Ferri", branding: {} },
-      category: resolveCategory([fieldService, stoves], defs),
+      tenant: { id: "t", name: "Ferri", branding: {}, needs: ["parts"] },
+      category: resolveCategory([fieldService, stoves], defs, needs),
       memberships: [],
       role: { id: "r", name: "Titolare", permissions: [...PERMISSIONS] },
       moduleStates: [],
@@ -126,7 +174,9 @@ describe("buildManifest", () => {
       now,
     });
     expect(manifest.navigation.map((item) => item.key)).toEqual(["dashboard", "work_orders", "more"]);
+    expect(manifest.plan).toMatchObject({ paidModules: 0, monthlyCents: 0, seats: { included: 3, extra: 0, priceCents: 500 } });
     expect(manifest.modules.find((module) => module.key === "spare_parts")?.status).toBe("locked");
+    expect(manifest.modules.find((module) => module.key === "stock")?.score).toBe(3);
     expect(manifest.tenant.branding.accent).toBe("#E25B2A");
     expect(manifest.tenant.category.path).toEqual(["field_service", "stoves"]);
   });

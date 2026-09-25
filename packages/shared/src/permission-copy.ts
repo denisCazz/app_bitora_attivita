@@ -192,8 +192,8 @@ export const PERMISSION_COPY: Record<Permission, PermissionText> = {
   "team.manage": {
     module: "settings",
     section: "Impostazioni",
-    label: "Invitare persone",
-    description: "Manda un invito e sceglie il ruolo",
+    label: "Gestire gli utenti",
+    description: "Invita, cambia ruolo e rimuove. Tre inclusi, poi 5€ al mese",
   },
 };
 

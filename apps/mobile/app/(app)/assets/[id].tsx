@@ -10,7 +10,7 @@ import { Chip } from "../../../src/components/Chip";
 import { RecordPicker } from "../../../src/components/RecordPicker";
 import { QueryState } from "../../../src/components/States";
 import { fromLocalInput, STATUS_LABEL, toLocalInput, when } from "../../../src/format";
-import { useManifest } from "../../../src/session";
+import { useManifest, useVocab } from "../../../src/session";
 
 interface AssetDetail {
   id: string;
@@ -35,8 +35,9 @@ export default function AssetScreen() {
   const [editing, setEditing] = useState(false);
   const [customerQ, setCustomerQ] = useState("");
   const [draft, setDraft] = useState({ name: "", type: "", brand: "", model: "", serialNumber: "", notes: "", installedAt: "", customerId: null as string | null });
-  const [plan, setPlan] = useState({ title: "", dueAt: "", interval: "", kind: "" as "" | "ANNUAL_CLEANING" | "FLUE_CHECK" | "HACCP" | "GENERIC" });
-  const [planEdit, setPlanEdit] = useState<null | { id: string; title: string; dueAt: string; interval: string; kind: "" | "ANNUAL_CLEANING" | "FLUE_CHECK" | "HACCP" | "GENERIC" }>(null);
+  const { scheduleKinds } = useVocab();
+  const [plan, setPlan] = useState({ title: "", dueAt: "", interval: "", kind: "" });
+  const [planEdit, setPlanEdit] = useState<null | { id: string; title: string; dueAt: string; interval: string; kind: string }>(null);
   const query = useQuery({ queryKey: ["asset", id], queryFn: () => http.get<AssetDetail>(`/assets/${id}`) });
   const customers = useQuery({
     queryKey: ["customers", customerQ],
@@ -140,7 +141,7 @@ export default function AssetScreen() {
                       title: item.title,
                       dueAt: toLocalInput(item.dueAt),
                       interval: item.intervalMonths ? String(item.intervalMonths) : "",
-                      kind: item.kind === "ANNUAL_CLEANING" || item.kind === "FLUE_CHECK" || item.kind === "HACCP" || item.kind === "GENERIC" ? item.kind : "",
+                      kind: item.kind,
                     });
                   }}
                 />
@@ -152,15 +153,8 @@ export default function AssetScreen() {
               <Input label="Quando" value={plan.dueAt} onChangeText={(dueAt) => setPlan({ ...plan, dueAt })} />
               <Input label="Ogni quanti mesi" keyboardType="number-pad" value={plan.interval} onChangeText={(interval) => setPlan({ ...plan, interval })} />
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {(
-                  [
-                    ["ANNUAL_CLEANING", "Pulizia"],
-                    ["FLUE_CHECK", "Fumi"],
-                    ["HACCP", "HACCP"],
-                    ["GENERIC", "Generico"],
-                  ] as const
-                ).map(([kind, label]) => (
-                  <Chip key={kind} label={label} active={plan.kind === kind} onPress={() => setPlan({ ...plan, kind: plan.kind === kind ? "" : kind })} />
+                {scheduleKinds.map(({ key, label }) => (
+                  <Chip key={key} label={label} active={plan.kind === key} onPress={() => setPlan({ ...plan, kind: plan.kind === key ? "" : key })} />
                 ))}
               </View>
               {schedule.error ? <Text>{schedule.error.message}</Text> : null}
@@ -176,19 +170,12 @@ export default function AssetScreen() {
                 onChangeText={(interval) => setPlanEdit((current) => (current ? { ...current, interval } : current))}
               />
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {(
-                  [
-                    ["ANNUAL_CLEANING", "Pulizia"],
-                    ["FLUE_CHECK", "Fumi"],
-                    ["HACCP", "HACCP"],
-                    ["GENERIC", "Generico"],
-                  ] as const
-                ).map(([kind, label]) => (
+                {scheduleKinds.map(({ key, label }) => (
                   <Chip
-                    key={kind}
+                    key={key}
                     label={label}
-                    active={planEdit?.kind === kind}
-                    onPress={() => setPlanEdit((current) => (current ? { ...current, kind: current.kind === kind ? "" : kind } : current))}
+                    active={planEdit?.kind === key}
+                    onPress={() => setPlanEdit((current) => (current ? { ...current, kind: current.kind === key ? "" : key } : current))}
                   />
                 ))}
               </View>

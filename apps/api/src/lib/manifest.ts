@@ -1,5 +1,5 @@
 import type { CustomFieldDef } from "@prisma/client";
-import { buildManifest, isModuleKey, type CustomFieldDTO, type ModuleKey } from "@rapportini/shared";
+import { buildManifest, isModuleKey, type CustomFieldDTO, type ModuleKey, type TenantActivityPresets, type Terminology } from "@rapportini/shared";
 import { HttpError } from "../errors";
 import { resolvedCategory } from "./catalog";
 import { prisma } from "./prisma";
@@ -39,17 +39,28 @@ export async function manifestFor(userId: string, tenantId: string) {
     resolvedCategory(membership.tenant.categoryId),
   ]);
 
-  const settings = (membership.tenant.settings ?? {}) as { terminology?: Record<string, string> };
+  const settings = (membership.tenant.settings ?? {}) as {
+    terminology?: Partial<Terminology>;
+    activity?: string;
+    presets?: TenantActivityPresets;
+  };
   const branding = (membership.tenant.branding ?? {}) as { accent?: string; logoUrl?: string | null };
 
   return buildManifest({
     user: { id: user.id, name: user.name, email: user.email, platformAdmin: user.platformAdmin && !user.email.endsWith(".demo") },
-    tenant: { id: membership.tenant.id, name: membership.tenant.name, branding, terminology: settings.terminology },
+    tenant: {
+      id: membership.tenant.id,
+      name: membership.tenant.name,
+      branding,
+      terminology: settings.terminology,
+      needs: membership.tenant.needs,
+      activity: settings.activity,
+      presets: settings.presets,
+    },
     category,
     memberships: memberships.map((item) => ({
       tenantId: item.tenantId,
       tenantName: item.tenant.name,
-      vertical: item.tenant.vertical,
       roleName: item.role.name,
     })),
     role: { id: membership.role.id, name: membership.role.name, permissions: membership.role.permissions },
@@ -62,5 +73,6 @@ export async function manifestFor(userId: string, tenantId: string) {
         trialEndsAt: module.trialEndsAt,
       })),
     customFields: fields.map(toField),
+    extraSeats: membership.tenant.extraSeats,
   });
 }

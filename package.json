@@ -10,7 +10,7 @@
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",
     "db:up": "docker compose up -d",
-    "db:migrate": "pnpm --filter @rapportini/api exec prisma migrate dev",
+    "db:migrate": "pnpm --filter @rapportini/api prisma:dev",
     "db:seed": "pnpm --filter @rapportini/api prisma:seed",
     "db:setup": "pnpm db:up && pnpm --filter @rapportini/api prisma:deploy && pnpm db:seed"
   },

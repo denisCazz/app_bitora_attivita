@@ -1,4 +1,4 @@
-import { acceptInviteSchema, loginSchema, pushTokenSchema, registerSchema } from "@rapportini/shared";
+import { acceptInviteSchema, demoLoginSchema, INCLUDED_SEATS, loginSchema, pushTokenSchema, registerSchema, seatLimitMessage } from "@rapportini/shared";
 import type { FastifyInstance } from "fastify";
 import { HttpError, parseBody } from "../errors";
 import { hashPassword, hashToken, issueSession, verifyPassword } from "../lib/auth";
@@ -18,6 +18,20 @@ export async function authRoutes(app: FastifyInstance) {
     return { ...session, user: { id: user.id, name: user.name, email: user.email }, needsOnboarding: true };
   });
 
+  app.post("/auth/demo", async (request) => {
+    const body = parseBody(demoLoginSchema, request.body);
+    const email = body.email.toLowerCase();
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) throw new HttpError(404, "Demo non disponibile");
+    const session = await issueSession(user.id, user.activeTenantId);
+    return {
+      ...session,
+      user: { id: user.id, name: user.name, email: user.email, platformAdmin: false },
+      activeTenantId: user.activeTenantId,
+      needsOnboarding: !user.activeTenantId,
+    };
+  });
+
   app.post("/auth/login", async (request) => {
     const body = parseBody(loginSchema, request.body);
     const user = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } });
@@ -25,10 +39,12 @@ export async function authRoutes(app: FastifyInstance) {
       throw new HttpError(401, "Credenziali non valide");
     }
     const session = await issueSession(user.id, user.activeTenantId);
+    const platformAdmin = user.platformAdmin && !user.email.endsWith(".demo");
     return {
       ...session,
-      user: { id: user.id, name: user.name, email: user.email },
-      needsOnboarding: !user.activeTenantId,
+      user: { id: user.id, name: user.name, email: user.email, platformAdmin },
+      activeTenantId: user.activeTenantId,
+      needsOnboarding: !user.activeTenantId && !platformAdmin,
     };
   });
 
@@ -45,19 +61,29 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post("/auth/accept-invite", async (request) => {
     const body = parseBody(acceptInviteSchema, request.body);
-    const invite = await prisma.invite.findUnique({ where: { token: body.token } });
-    if (!invite || invite.acceptedAt || invite.expiresAt < new Date()) throw new HttpError(410, "Invito non valido");
-    const email = invite.email.toLowerCase();
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) throw new HttpError(409, "Esiste già un account con questa email");
-    const user = await prisma.user.create({
-      data: { email, name: body.name, passwordHash: await hashPassword(body.password), activeTenantId: invite.tenantId },
+    const user = await prisma.$transaction(async (tx) => {
+      const invite = await tx.invite.findUnique({ where: { token: body.token } });
+      if (!invite || invite.acceptedAt || invite.expiresAt < new Date()) throw new HttpError(410, "Invito non valido");
+      const email = invite.email.toLowerCase();
+      const existing = await tx.user.findUnique({ where: { email } });
+      if (existing) throw new HttpError(409, "Esiste già un account con questa email");
+      const tenant = await tx.tenant.findUnique({ where: { id: invite.tenantId } });
+      if (!tenant) throw new HttpError(410, "Invito non valido");
+      const active = await tx.membership.count({ where: { tenantId: invite.tenantId, status: "ACTIVE" } });
+      const pending = await tx.invite.count({
+        where: { tenantId: invite.tenantId, acceptedAt: null, expiresAt: { gt: new Date() }, id: { not: invite.id } },
+      });
+      if (active + pending >= INCLUDED_SEATS + tenant.extraSeats) throw new HttpError(402, seatLimitMessage());
+      const created = await tx.user.create({
+        data: { email, name: body.name, passwordHash: await hashPassword(body.password), activeTenantId: invite.tenantId },
+      });
+      await tx.membership.create({
+        data: { userId: created.id, tenantId: invite.tenantId, roleId: invite.roleId, status: "ACTIVE" },
+      });
+      await tx.invite.update({ where: { id: invite.id }, data: { acceptedAt: new Date() } });
+      return created;
     });
-    await prisma.membership.create({
-      data: { userId: user.id, tenantId: invite.tenantId, roleId: invite.roleId, status: "ACTIVE" },
-    });
-    await prisma.invite.update({ where: { id: invite.id }, data: { acceptedAt: new Date() } });
-    const session = await issueSession(user.id, invite.tenantId);
+    const session = await issueSession(user.id, user.activeTenantId);
     return { ...session, user: { id: user.id, name: user.name, email: user.email }, needsOnboarding: false };
   });
 
@@ -72,11 +98,11 @@ export async function authRoutes(app: FastifyInstance) {
       id: user.id,
       name: user.name,
       email: user.email,
+      platformAdmin: user.platformAdmin && !user.email.endsWith(".demo"),
       activeTenantId: user.activeTenantId,
       memberships: memberships.map((item) => ({
         tenantId: item.tenantId,
         tenantName: item.tenant.name,
-        vertical: item.tenant.vertical,
         roleName: item.role.name,
       })),
     };
@@ -115,9 +141,19 @@ export async function authRoutes(app: FastifyInstance) {
     });
   });
 
+  app.post("/notifications/read", { preHandler: app.requireTenant }, async (request) => {
+    await prisma.notification.updateMany({
+      where: { tenantId: tenantId(request), readAt: null, OR: [{ userId: request.auth!.userId }, { userId: null }] },
+      data: { readAt: new Date() },
+    });
+    return { ok: true };
+  });
+
   app.post("/notifications/:id/read", { preHandler: app.requireTenant }, async (request) => {
     const id = (request.params as { id: string }).id;
-    const row = await prisma.notification.findFirst({ where: { id, tenantId: tenantId(request) } });
+    const row = await prisma.notification.findFirst({
+      where: { id, tenantId: tenantId(request), OR: [{ userId: request.auth!.userId }, { userId: null }] },
+    });
     if (!row) throw new HttpError(404, "Notifica non trovata");
     return prisma.notification.update({ where: { id }, data: { readAt: new Date() } });
   });

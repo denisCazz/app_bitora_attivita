@@ -49,7 +49,7 @@ export default function SuppliersScreen() {
     },
   });
   const receive = useMutation({
-    mutationFn: (orderId: string) => http.post(`/purchase-orders/${orderId}/receive`, { locationId: locations.data?.find((location) => location.kind === "KITCHEN")?.id ?? locations.data?.[0]?.id }),
+    mutationFn: (orderId: string) => http.post(`/purchase-orders/${orderId}/receive`, { locationId: locations.data?.find((location) => location.kind === "POINT")?.id ?? locations.data?.[0]?.id }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["balances"] }),
   });
 

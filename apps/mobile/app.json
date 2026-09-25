@@ -11,9 +11,14 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.bitora.mobile",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
       "infoPlist": {
         "NSCameraUsageDescription": "Serve per fotografare l'intervento e leggere i codici dei ricambi.",
-        "NSPhotoLibraryUsageDescription": "Serve per allegare foto dal rullino."
+        "NSMicrophoneUsageDescription": "Serve per registrare audio e video durante l'intervento.",
+        "NSPhotoLibraryUsageDescription": "Serve per allegare foto dal rullino.",
+        "NSPhotoLibraryAddUsageDescription": "Serve per salvare nel rullino le foto dell'intervento."
       }
     },
     "android": {
@@ -27,6 +32,11 @@
       "permissions": [
         "CAMERA",
         "POST_NOTIFICATIONS"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
       ]
     },
     "web": {
@@ -34,19 +44,39 @@
       "bundler": "metro"
     },
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#07080B",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#07080B",
+            "image": "./assets/splash-icon.png"
+          }
+        }
+      ],
       "expo-router",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Serve per proteggere l'accesso al tuo account."
+        }
+      ],
       "expo-sharing",
       [
         "expo-camera",
         {
-          "cameraPermission": "Serve per fotografare l'intervento e leggere i codici dei ricambi."
+          "cameraPermission": "Serve per fotografare l'intervento e leggere i codici dei ricambi.",
+          "microphonePermission": "Serve per registrare audio e video durante l'intervento."
         }
       ],
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Serve per fotografare l'intervento.",
+          "cameraPermission": "Serve per fotografare l'intervento e leggere i codici dei ricambi.",
+          "microphonePermission": "Serve per registrare audio e video durante l'intervento.",
           "photosPermission": "Serve per allegare foto dal rullino."
         }
       ],
@@ -57,7 +87,14 @@
         }
       ],
       "expo-web-browser",
-      "expo-image"
+      "expo-image",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Serve per dettare i comandi all'assistente e registrare audio durante l'intervento.",
+          "enableBackgroundPlayback": false
+        }
+      ]
     ],
     "extra": {
       "apiUrl": "http://localhost:3001"

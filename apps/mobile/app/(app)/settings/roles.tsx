@@ -47,7 +47,7 @@ export default function RolesScreen() {
             <PermissionToggles
               selected={role.permissions}
               catalog={catalog}
-              locked={role.isSystem ? ["settings.manage"] : []}
+              locked={role.isSystem ? ["settings.manage", "team.manage"] : []}
               disabled={save.isPending}
               onToggle={(permission) => toggle(role, permission)}
             />

@@ -18,6 +18,8 @@ const TERM_LABEL: Record<keyof Terminology, string> = {
   customers: "Clienti (plurale)",
   sparePart: "Ricambio (singolare)",
   spareParts: "Ricambi (plurale)",
+  warehouse: "Magazzino",
+  vehicle: "Mezzo (furgone, auto…)",
 };
 
 const SWATCHES = ["#2F6FED", "#E25B2A", "#D9480F", "#0EA5E9", "#1C6B56", "#B4431E", "#7C3AED", "#DB2777", "#0F766E", "#CA8A04"];
@@ -88,7 +90,7 @@ function GeneralSection({ category }: { category: AdminCategory }) {
         </View>
         <Input label="Colore HEX" value={accent} onChangeText={setAccent} autoCapitalize="none" placeholder="Eredita" />
       </View>
-      <Input label="Immagine (asset:stove, asset:bar o URL)" value={image} onChangeText={setImage} autoCapitalize="none" placeholder="Eredita" />
+      <Input label="Immagine (asset:stove, asset:boiler, asset:hvac, asset:bar o URL)" value={image} onChangeText={setImage} autoCapitalize="none" placeholder="Eredita" />
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
         <View style={{ flex: 1, gap: 2 }}>
           <Text variant="heading">Visibile nella registrazione</Text>
@@ -151,8 +153,8 @@ function ModuleRow({
   categoryId: string;
   parentId: string | null;
   definition: { key: string; label: string; description: string; priceCents: number };
-  own: { included: boolean; free: boolean | null; tab: boolean | null; label: string | null; description: string | null } | undefined;
-  effective: { label: string; description: string; free: boolean; tab: boolean; priceCents: number } | undefined;
+  own: { included: boolean; recommended: boolean | null; free: boolean | null; tab: boolean | null; label: string | null; description: string | null } | undefined;
+  effective: { label: string; description: string; free: boolean; recommended: boolean; tab: boolean; priceCents: number } | undefined;
 }) {
   const theme = useTheme();
   const [label, setLabel] = useState(own?.label ?? "");
@@ -163,6 +165,7 @@ function ModuleRow({
   const base = {
     moduleKey: definition.key,
     included: own?.included ?? true,
+    recommended: own?.recommended ?? null,
     free: own?.free ?? null,
     tab: own?.tab ?? null,
     label: own?.label ?? null,
@@ -175,12 +178,13 @@ function ModuleRow({
         <Text variant="heading" style={{ flex: 1 }}>
           {effective?.label ?? definition.label}
         </Text>
-        {effective ? <Badge tone={effective.free ? "success" : "accent"} label={effective.free ? "Gratis" : `€ ${euros(effective.priceCents)}`} /> : <Badge label="Non incluso" />}
+        {effective ? <Badge tone={effective.free ? "success" : "accent"} label={effective.free ? "Gratis" : `€ ${euros(effective.priceCents)}`} /> : <Badge label="Nascosto" />}
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        <Chip label="Incluso" active={Boolean(effective)} onPress={() => void run(() => upsert.mutateAsync({ ...base, included: !effective }))} />
+        <Chip label="Nascosto" tone={theme.colors.danger} active={!effective} onPress={() => void run(() => upsert.mutateAsync({ ...base, included: !effective }))} />
         {effective ? (
           <>
+            <Chip label="Consigliato" active={effective.recommended} onPress={() => void run(() => upsert.mutateAsync({ ...base, included: true, recommended: !effective.recommended }))} />
             <Chip label="Gratis" tone={theme.colors.success} active={effective.free} onPress={() => void run(() => upsert.mutateAsync({ ...base, included: true, free: !effective.free }))} />
             <Chip label="Nel menu" active={effective.tab} onPress={() => void run(() => upsert.mutateAsync({ ...base, included: true, tab: !effective.tab }))} />
           </>
@@ -204,7 +208,10 @@ function ModulesSection({ category, preview }: { category: AdminCategory; previe
   const catalog = useAdminCatalog();
 
   return (
-    <Section title="Moduli" hint="Incluso, gratis e nel menu valgono per questa categoria. Nome e testo vuoti usano il modello del catalogo: se scrivi, l'app mostra le tue parole.">
+    <Section
+      title="Moduli"
+      hint="Ogni modulo è in vendita a tutti. Qui decidi cosa è gratis, cosa proponiamo per primo (consigliato), cosa sta nel menu e cosa nascondere. Nome e testo vuoti usano il modello del catalogo."
+    >
       {catalog.data?.modules.map((definition) => {
         const own = category.modules.find((row) => row.moduleKey === definition.key);
         const effective = preview.modules.find((module) => module.key === definition.key);
@@ -219,6 +226,71 @@ function ModulesSection({ category, preview }: { category: AdminCategory; previe
           />
         );
       })}
+    </Section>
+  );
+}
+
+function NeedsSection({ category, inherited }: { category: AdminCategory; inherited: string[] }) {
+  const theme = useTheme();
+  const catalog = useAdminCatalog();
+  const own = (catalog.data?.needs ?? []).filter((need) => need.categoryId === category.id);
+  const [label, setLabel] = useState("");
+  const [description, setDescription] = useState("");
+  const [modules, setModules] = useState<string[]>([]);
+  const create = useAdminMutation((body: Record<string, unknown>) => http.post("/admin/needs", body));
+  const remove = useAdminMutation((id: string) => http.del(`/admin/needs/${id}`));
+  const { error, run } = useErrors();
+  const key = `${category.key}_${label}`
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "")
+    .slice(0, 40);
+
+  return (
+    <Section title="Esigenze" hint="Le domande dell'onboarding: ogni esigenza scelta mette in cima i suoi moduli. Valgono anche per le sottocategorie.">
+      {inherited.length ? (
+        <Text variant="caption" muted>
+          Già proposte: {inherited.join(", ")}
+        </Text>
+      ) : null}
+      {own.map((need) => (
+        <View key={need.id} style={{ gap: 6, paddingVertical: 8, borderTopWidth: 1, borderTopColor: theme.colors.line }}>
+          <Text variant="heading">{need.label}</Text>
+          <Text variant="caption" muted>
+            {need.modules.map((moduleKey) => catalog.data?.modules.find((module) => module.key === moduleKey)?.label ?? moduleKey).join(", ")}
+          </Text>
+          <Button tone="ghost" label="Rimuovi" onPress={() => void run(() => remove.mutateAsync(need.id))} />
+        </View>
+      ))}
+      <Input label="Nuova esigenza" value={label} onChangeText={setLabel} placeholder="Es. Gestire gli abbonamenti" />
+      <Input label="Spiegazione" value={description} onChangeText={setDescription} />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        {catalog.data?.modules.map((module) => (
+          <Chip
+            key={module.key}
+            label={module.label}
+            active={modules.includes(module.key)}
+            onPress={() => setModules((current) => (current.includes(module.key) ? current.filter((item) => item !== module.key) : [...current, module.key]))}
+          />
+        ))}
+      </View>
+      {error ? <Text style={{ color: theme.colors.danger }}>{error}</Text> : null}
+      <Button
+        label="Aggiungi esigenza"
+        loading={create.isPending}
+        disabled={label.trim().length < 2 || !modules.length}
+        onPress={() =>
+          void run(() =>
+            create.mutateAsync({ key, categoryId: category.id, label: label.trim(), description: description.trim(), modules, sortOrder: own.length }).then(() => {
+              setLabel("");
+              setDescription("");
+              setModules([]);
+            }),
+          )
+        }
+      />
     </Section>
   );
 }
@@ -334,6 +406,10 @@ export default function CategoryScreen() {
             </View>
             <GeneralSection key={`g:${category.id}:${category.label}:${category.accent}`} category={category} />
             <ModulesSection category={category} preview={preview.data} />
+            <NeedsSection
+              category={category}
+              inherited={preview.data.needs.filter((need) => !catalog.data?.needs.some((row) => row.key === need.key && row.categoryId === category.id)).map((need) => need.label)}
+            />
             <TerminologySection key={`t:${category.id}`} category={category} inherited={inherited?.terminology ?? preview.data.terminology} />
             <AssetTypesSection key={`a:${category.id}`} category={category} inherited={inherited?.presets.assetTypes ?? []} />
             <RolesSection

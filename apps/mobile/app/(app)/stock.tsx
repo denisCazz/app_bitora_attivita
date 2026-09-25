@@ -1,17 +1,21 @@
+import { matchesPartQuery, matchesScannedCode } from "@rapportini/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { View } from "react-native";
 import { Button, Card, EmptyState, Input, Screen, Sheet, Text, useTheme } from "@rapportini/ui";
 import { http } from "../../src/api/client";
 import { queryClient } from "../../src/api/query";
+import { BarcodeScan } from "../../src/components/BarcodeScan";
 import { Chip } from "../../src/components/Chip";
 import { RecordPicker } from "../../src/components/RecordPicker";
 import { QueryState } from "../../src/components/States";
+import { useManifest } from "../../src/session";
 
 interface Part {
   id: string;
   sku: string;
   name: string;
+  barcode?: string | null;
 }
 
 interface Location {
@@ -46,6 +50,11 @@ function parseQty(value: string) {
 
 export default function StockScreen() {
   const theme = useTheme();
+  const manifest = useManifest();
+  const terms = manifest.data?.tenant.terminology;
+  const vehicleWord = terms?.vehicle ?? "Mezzo";
+  const warehouseWord = terms?.warehouse ?? "Magazzino";
+  const title = manifest.data?.modules.find((module) => module.key === "stock")?.label ?? warehouseWord;
   const [query, setQuery] = useState("");
   const [warehouseId, setWarehouseId] = useState<string | null>(null);
   const [vanId, setVanId] = useState<string | null>(null);
@@ -54,13 +63,14 @@ export default function StockScreen() {
   const [quantity, setQuantity] = useState("1");
   const [loadOpen, setLoadOpen] = useState(false);
   const [loadQuery, setLoadQuery] = useState("");
+  const [scanFor, setScanFor] = useState<"list" | "load" | null>(null);
 
   const balances = useQuery({ queryKey: ["balances"], queryFn: () => http.get<Balance[]>("/stock/balances") });
   const locations = useQuery({ queryKey: ["stock-locations"], queryFn: () => http.get<Location[]>("/stock/locations") });
   const parts = useQuery({ queryKey: ["parts", ""], queryFn: () => http.get<Part[]>("/spare-parts") });
 
   const warehouses = locations.data?.filter((location) => location.kind === "WAREHOUSE") ?? [];
-  const vans = locations.data?.filter((location) => location.kind === "VAN") ?? [];
+  const vans = locations.data?.filter((location) => location.kind === "MOBILE") ?? [];
   const warehouse = warehouses.find((location) => location.id === warehouseId) ?? warehouses[0];
   const van = vans.find((location) => location.id === vanId) ?? vans[0];
 
@@ -70,22 +80,31 @@ export default function StockScreen() {
   }
 
   const needle = query.trim().toLowerCase();
-  const rows = (parts.data ?? [])
+  const codeLookup = useQuery({
+    queryKey: ["parts", "barcode", needle],
+    queryFn: () => http.get<Part[]>(`/spare-parts?barcode=${encodeURIComponent(query.trim())}`),
+    enabled: needle.length >= 6 && /\d/.test(needle),
+  });
+  const catalog = useMemo(() => {
+    const list = parts.data ?? [];
+    const extra = (codeLookup.data ?? []).filter((part) => !list.some((row) => row.id === part.id));
+    return extra.length ? [...extra, ...list] : list;
+  }, [parts.data, codeLookup.data]);
+  const rows = catalog
     .map((part) => ({
       part,
       warehouseQty: qtyAt(part.id, warehouse?.id),
       vanQty: qtyAt(part.id, van?.id),
     }))
     .filter((row) => {
-      const matches = !needle || row.part.name.toLowerCase().includes(needle) || row.part.sku.toLowerCase().includes(needle);
-      if (!matches) return false;
+      if (!matchesPartQuery(row.part, query)) return false;
       if (needle) return true;
       return row.warehouseQty > 0 || row.vanQty > 0;
     });
 
   const transfer = useMutation({
     mutationFn: () => {
-      if (!draft || !warehouse || !van) throw new Error("Scegli magazzino e furgone");
+      if (!draft || !warehouse || !van) throw new Error(`Scegli ${warehouseWord.toLowerCase()} e ${vehicleWord.toLowerCase()}`);
       const amount = parseQty(quantity);
       if (!(amount > 0)) throw new Error("Scrivi la quantità");
       if (amount > draft.available + 0.0005) throw new Error(`Disponibili solo ${formatQty(draft.available)}`);
@@ -121,8 +140,8 @@ export default function StockScreen() {
   });
 
   const createLocation = useMutation({
-    mutationFn: (kind: "WAREHOUSE" | "VAN") =>
-      http.post("/stock/locations", { name: kind === "VAN" ? "Furgone" : "Magazzino", kind }),
+    mutationFn: (kind: "WAREHOUSE" | "MOBILE") =>
+      http.post("/stock/locations", { name: kind === "MOBILE" ? vehicleWord : warehouseWord, kind }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["stock-locations"] });
     },
@@ -144,15 +163,57 @@ export default function StockScreen() {
 
   const fromLabel = draft?.direction === "toVan" ? warehouse?.name : van?.name;
   const toLabel = draft?.direction === "toVan" ? van?.name : warehouse?.name;
-  const loadNeedle = loadQuery.trim().toLowerCase();
-  const loadChoices = (parts.data ?? []).filter(
-    (part) => !loadNeedle || part.name.toLowerCase().includes(loadNeedle) || part.sku.toLowerCase().includes(loadNeedle),
-  );
+  const loadChoices = catalog.filter((part) => matchesPartQuery(part, loadQuery));
+
+  function pickerSubtitle(part: Part, typed: string) {
+    const bits = [part.sku, part.barcode].filter((bit): bit is string => Boolean(bit));
+    const needleText = typed.trim().toLowerCase();
+    const visible = `${part.name} ${bits.join(" ")}`.toLowerCase();
+    if (needleText && !visible.includes(needleText)) bits.push(typed.trim());
+    return bits.join(" · ");
+  }
+
+  async function applyScan(code: string) {
+    const trimmed = code.trim();
+    const target = scanFor;
+    setScanFor(null);
+    if (!trimmed) return;
+    if (target === "load") setLoadOpen(true);
+    else setQuery(trimmed);
+    let found: Part[] = [];
+    try {
+      found = await http.get<Part[]>(`/spare-parts?barcode=${encodeURIComponent(trimmed)}`);
+    } catch {
+      found = [];
+    }
+    if (found.length) {
+      queryClient.setQueryData<Part[]>(["parts", ""], (current) => {
+        const list = current ?? [];
+        const missing = found.filter((part) => !list.some((row) => row.id === part.id));
+        return missing.length ? [...missing, ...list] : list;
+      });
+    }
+    if (target !== "load") return;
+    const part = found[0] ?? catalog.find((item) => matchesScannedCode(item, trimmed));
+    if (part) {
+      setLoadPart(part);
+      setLoadQuery("");
+      return;
+    }
+    setLoadPart(null);
+    setLoadQuery(trimmed);
+  }
+
+  if (scanFor) {
+    return <BarcodeScan title="Scansiona" onClose={() => setScanFor(null)} onCode={applyScan} />;
+  }
 
   return (
     <Screen>
-      <Text variant="display">Furgone</Text>
-      <Text muted>Sposta i ricambi tra magazzino e furgone. Quello che carichi resta sul mezzo finché non lo riporti indietro.</Text>
+      <Text variant="display">{title}</Text>
+      <Text muted>
+        Sposta gli articoli tra {warehouseWord.toLowerCase()} e {vehicleWord.toLowerCase()}. Quello che carichi resta sul mezzo finché non lo riporti indietro.
+      </Text>
       <QueryState
         isLoading={balances.isLoading || locations.isLoading || parts.isLoading}
         error={balances.error ?? locations.error ?? parts.error}
@@ -164,14 +225,14 @@ export default function StockScreen() {
       >
         {!warehouse || !van ? (
           <EmptyState
-            title={!van ? "Nessun furgone" : "Nessun magazzino"}
+            title={`Manca: ${!van ? vehicleWord.toLowerCase() : warehouseWord.toLowerCase()}`}
             message="Servono entrambe le sedi per spostare i ricambi."
             action={
               <View style={{ gap: 8, alignSelf: "stretch" }}>
                 {!warehouse ? (
-                  <Button label="Crea magazzino" loading={createLocation.isPending} onPress={() => createLocation.mutate("WAREHOUSE")} />
+                  <Button label={`Crea ${warehouseWord.toLowerCase()}`} loading={createLocation.isPending} onPress={() => createLocation.mutate("WAREHOUSE")} />
                 ) : null}
-                {!van ? <Button label="Crea furgone" loading={createLocation.isPending} onPress={() => createLocation.mutate("VAN")} /> : null}
+                {!van ? <Button label={`Crea ${vehicleWord.toLowerCase()}`} loading={createLocation.isPending} onPress={() => createLocation.mutate("MOBILE")} /> : null}
               </View>
             }
           />
@@ -191,7 +252,8 @@ export default function StockScreen() {
                 ))}
               </View>
             ) : null}
-            <Input label="Cerca ricambio" value={query} onChangeText={setQuery} />
+            <Input label="Cerca ricambio" value={query} onChangeText={setQuery} autoCorrect={false} autoCapitalize="none" />
+            <Button label="Scansiona codice" tone="secondary" onPress={() => setScanFor("list")} />
             <Button label={`Carico in ${warehouse.name}`} tone="secondary" onPress={() => openLoad()} />
             {rows.length ? (
               rows.map((row) => (
@@ -199,7 +261,7 @@ export default function StockScreen() {
                   <View style={{ gap: 2 }}>
                     <Text variant="heading">{row.part.name}</Text>
                     <Text variant="caption" muted>
-                      {row.part.sku}
+                      {[row.part.sku, row.part.barcode].filter(Boolean).join(" · ")}
                     </Text>
                   </View>
                   <View style={{ flexDirection: "row", gap: 8 }}>
@@ -264,7 +326,7 @@ export default function StockScreen() {
                 message={
                   needle
                     ? "Nessun ricambio corrisponde alla ricerca."
-                    : "Registra un carico in magazzino, poi caricalo sul furgone."
+                    : `Registra un carico in ${warehouseWord.toLowerCase()}, poi caricalo su ${vehicleWord.toLowerCase()}.`
                 }
               />
             )}
@@ -274,7 +336,7 @@ export default function StockScreen() {
 
       <Sheet
         visible={Boolean(draft)}
-        title={draft?.direction === "toVan" ? `Carica sul ${van?.name ?? "furgone"}` : `Riporta in ${warehouse?.name ?? "magazzino"}`}
+        title={draft?.direction === "toVan" ? `Carica su ${van?.name ?? vehicleWord}` : `Riporta in ${warehouse?.name ?? warehouseWord}`}
         onClose={() => setDraft(null)}
       >
         {draft && warehouse && van ? (
@@ -301,15 +363,18 @@ export default function StockScreen() {
         ) : null}
       </Sheet>
 
-      <Sheet visible={loadOpen} title={`Carico in ${warehouse?.name ?? "magazzino"}`} onClose={() => setLoadOpen(false)}>
-        <Text muted>Entra solo nel magazzino. Poi lo puoi caricare sul furgone.</Text>
+      <Sheet visible={loadOpen} title={`Carico in ${warehouse?.name ?? warehouseWord}`} onClose={() => setLoadOpen(false)}>
+        <Text muted>
+          Entra solo in {warehouse?.name ?? warehouseWord}. Poi lo puoi caricare su {vehicleWord.toLowerCase()}.
+        </Text>
+        <Button label="Scansiona codice" tone="secondary" onPress={() => setScanFor("load")} />
         <RecordPicker
           label="Ricambio"
           query={loadQuery}
           onQuery={setLoadQuery}
-          options={loadChoices.map((part) => ({ id: part.id, title: part.name, subtitle: part.sku }))}
+          options={loadChoices.map((part) => ({ id: part.id, title: part.name, subtitle: pickerSubtitle(part, loadQuery) }))}
           value={loadPart?.id ?? null}
-          onChange={(id) => setLoadPart((parts.data ?? []).find((part) => part.id === id) ?? null)}
+          onChange={(id) => setLoadPart(catalog.find((part) => part.id === id) ?? null)}
         />
         <Input label="Quantità" keyboardType="decimal-pad" value={quantity} onChangeText={setQuantity} />
         {load.error ? <Text>{load.error.message}</Text> : null}

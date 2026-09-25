@@ -2,10 +2,11 @@
 
 App iOS e Android per la manutenzione, che cambia in base al mestiere del negozio.
 
-Due categorie iniziali:
+Tre categorie iniziali:
 
 - **Tecnici stufe**: impianti, pulizie annuali, controllo fumi, ricambi, furgone, rapportino PDF.
 - **Bar e ristoranti**: sala, comande per bar e cucina, menu con varianti, conto diviso, magazzino e ricette, fornitori, turni, checklist HACCP.
+- **Centri benessere**: agenda, schede cliente e trattamenti per unghie, parrucchieri e spa. Listino, turni, prodotti e igiene sono moduli extra.
 
 Ogni negozio configura ruoli, permessi, campi, checklist, moduli, colore e parole usate nell'interfaccia. All'avvio l'app legge `GET /me/manifest` e costruisce da lì menu e schermate.
 
@@ -18,12 +19,13 @@ pnpm dev:api
 pnpm dev:mobile
 ```
 
-`db:setup` avvia Postgres (porta 5433, per non scontrarsi con un Postgres locale) e Redis con Docker, applica le migrazioni e crea due negozi demo.
+Il database è PostgreSQL remoto. In `apps/api/.env` compila `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` e `DB_NAME`. `db:setup` avvia Redis con Docker, applica le migrazioni sul server indicato e crea i negozi demo.
 
 | Email | Password | Negozio |
 | --- | --- | --- |
 | marco@stufe.demo | demo1234 | Ferri Stufe |
 | giulia@bar.demo | demo1234 | Bar Garavella |
+| sara@unghie.demo | demo1234 | Atelier Unghie |
 
 L'API ascolta su `http://localhost:3001`. Sul telefono imposta `EXPO_PUBLIC_API_URL` con l'IP del computer.
 

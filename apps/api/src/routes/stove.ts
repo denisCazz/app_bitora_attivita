@@ -1,4 +1,4 @@
-import { sparePartSchema, stockAdjustSchema, stockTransferSchema } from "@rapportini/shared";
+import { matchesPartQuery, matchesScannedCode, sparePartSchema, stockAdjustSchema, stockLocationSchema, stockTransferSchema } from "@rapportini/shared";
 import type { FastifyInstance } from "fastify";
 import { HttpError, must, num, parseBody } from "../errors";
 import { prisma, tenantDb } from "../lib/prisma";
@@ -10,13 +10,12 @@ export async function stoveRoutes(app: FastifyInstance) {
     const query = request.query as { q?: string; barcode?: string; model?: string };
     const db = tenantDb(tenantId(request));
     if (query.barcode) {
-      const part = await db.sparePart.findFirst({ where: { barcode: query.barcode } });
-      return part ? [part] : [];
+      const parts = await db.sparePart.findMany();
+      return parts.filter((part) => matchesScannedCode(part, query.barcode!));
     }
     const parts = await db.sparePart.findMany({ orderBy: { name: "asc" }, take: 200 });
-    const q = query.q?.trim().toLowerCase();
     return parts.filter((part) => {
-      const matchesQuery = !q || part.name.toLowerCase().includes(q) || part.sku.toLowerCase().includes(q);
+      const matchesQuery = matchesPartQuery(part, query.q ?? "");
       const matchesModel = !query.model || part.compatibleModels.some((model) => model.toLowerCase().includes(query.model!.toLowerCase()));
       return matchesQuery && matchesModel;
     });
@@ -50,8 +49,7 @@ export async function stoveRoutes(app: FastifyInstance) {
   });
 
   app.post("/stock/locations", { preHandler: [app.requireTenant, permit("stock.adjust"), moduleGuard("stock")] }, async (request) => {
-    const body = request.body as { name?: string; kind?: "WAREHOUSE" | "VAN" | "KITCHEN" | "BAR" };
-    if (!body.name || !body.kind) throw new HttpError(400, "Nome e tipo obbligatori");
+    const body = parseBody(stockLocationSchema, request.body);
     const id = tenantId(request);
     return tenantDb(id).stockLocation.create({ data: { tenantId: id, name: body.name, kind: body.kind } });
   });
