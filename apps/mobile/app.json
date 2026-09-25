@@ -1,0 +1,66 @@
+{
+  "expo": {
+    "name": "Bitora",
+    "slug": "bitora",
+    "scheme": "bitora",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.bitora.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Serve per fotografare l'intervento e leggere i codici dei ricambi.",
+        "NSPhotoLibraryUsageDescription": "Serve per allegare foto dal rullino."
+      }
+    },
+    "android": {
+      "package": "app.bitora.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#F3EFE7",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "CAMERA",
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-sharing",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Serve per fotografare l'intervento e leggere i codici dei ricambi."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Serve per fotografare l'intervento.",
+          "photosPermission": "Serve per allegare foto dal rullino."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#E25B2A"
+        }
+      ],
+      "expo-web-browser",
+      "expo-image"
+    ],
+    "extra": {
+      "apiUrl": "http://localhost:3001"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rapportini
+      POSTGRES_PASSWORD: rapportini
+      POSTGRES_DB: rapportini
+    ports:
+      - "5433:5432"
+    volumes:
+      - rapportini_pg:/var/lib/postgresql/data
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+volumes:
+  rapportini_pg:
