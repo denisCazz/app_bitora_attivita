@@ -6,6 +6,7 @@ import { HttpError, must, parseBody } from "../errors";
 import { catalogNodes, invalidateCatalog, moduleDefinitions, needDefinitions, resolvedCategory } from "../lib/catalog";
 import { prisma } from "../lib/prisma";
 import { ensureModulePrice } from "../lib/stripe";
+import { isPlatformAdmin } from "../lib/team";
 import { requirePlatformAdmin } from "../plugins/guards";
 
 function param(request: { params: unknown }, name: string): string {
@@ -59,7 +60,7 @@ async function platformAccounts() {
     id: user.id,
     name: user.name,
     email: user.email,
-    platformAdmin: user.platformAdmin && !user.email.endsWith(".demo"),
+    platformAdmin: isPlatformAdmin(user),
     createdAt: user.createdAt.toISOString(),
     shops: user.memberships.map((membership) => {
       const tenant = membership.tenant;

@@ -90,7 +90,7 @@ export function isoDay(value: string): string | null {
   const text = value.trim();
   if (!text) return null;
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
-  if (!match) throw new Error("La consegna va scritta come AAAA-MM-GG");
+  if (!match) throw new Error("Data di consegna non valida");
   const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12));
   if (Number.isNaN(date.getTime())) throw new Error("Data di consegna non valida");
   return date.toISOString();

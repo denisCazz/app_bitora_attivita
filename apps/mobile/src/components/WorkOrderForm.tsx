@@ -9,6 +9,7 @@ import { fromLocalInput } from "../format";
 import { useManifest } from "../session";
 import { Chip } from "./Chip";
 import { CustomFields } from "./CustomFields";
+import { DateField } from "./DateField";
 import { RecordPicker } from "./RecordPicker";
 
 type Status = "DRAFT" | "SCHEDULED" | "IN_PROGRESS" | "DONE" | "CANCELLED";
@@ -45,7 +46,7 @@ const STATUSES: Array<{ id: Status; label: string }> = [
 
 export function workOrderBody(draft: WorkOrderDraft) {
   const scheduledAt = fromLocalInput(draft.scheduledAt);
-  if (draft.scheduledAt.trim() && !scheduledAt) throw new Error("Data non valida. Usa 2026-09-26T09:00");
+  if (draft.scheduledAt.trim() && !scheduledAt) throw new Error("Data non valida");
   return {
     title: draft.title.trim(),
     description: draft.description.trim() || null,
@@ -122,7 +123,7 @@ export function WorkOrderForm({ value, onChange }: { value: WorkOrderDraft; onCh
     <View style={{ gap: 12 }}>
       <Input label="Titolo" value={value.title} onChangeText={(title) => onChange({ ...value, title })} />
       <Input label="Note" value={value.description} onChangeText={(description) => onChange({ ...value, description })} multiline />
-      <Input label="Quando" value={value.scheduledAt} onChangeText={(scheduledAt) => onChange({ ...value, scheduledAt })} />
+      <DateField label="Quando" mode="datetime" value={value.scheduledAt} onChange={(scheduledAt) => onChange({ ...value, scheduledAt })} />
       <Text variant="label">Stato</Text>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         {STATUSES.map((status) => (
@@ -182,7 +183,7 @@ export function WorkOrderForm({ value, onChange }: { value: WorkOrderDraft; onCh
         <Input label="Marca" value={assetDraft.brand} onChangeText={(brand) => setAssetDraft({ ...assetDraft, brand })} />
         <Input label="Modello" value={assetDraft.model} onChangeText={(model) => setAssetDraft({ ...assetDraft, model })} />
         <Input label="Matricola" value={assetDraft.serialNumber} onChangeText={(serialNumber) => setAssetDraft({ ...assetDraft, serialNumber })} />
-        <Input label="Installato il" value={assetDraft.installedAt} onChangeText={(installedAt) => setAssetDraft({ ...assetDraft, installedAt })} />
+        <DateField label="Installato il" value={assetDraft.installedAt} onChange={(installedAt) => setAssetDraft({ ...assetDraft, installedAt })} />
         <Input label="Note" value={assetDraft.notes} onChangeText={(notes) => setAssetDraft({ ...assetDraft, notes })} multiline />
         <Text muted>Verrà collegato al cliente selezionato, se ne hai scelto uno.</Text>
         {createAsset.error ? <Text>{createAsset.error.message}</Text> : null}

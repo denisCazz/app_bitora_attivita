@@ -1,21 +1,49 @@
-import { createTenantSchema, INCLUDED_SEATS, inviteSchema, memberRoleSchema, seatLimitMessage } from "@rapportini/shared";
+import {
+  createTenantSchema,
+  employeePasswordSchema,
+  employeeSchema,
+  INCLUDED_SEATS,
+  inviteSchema,
+  memberRoleSchema,
+  PERMISSIONS,
+  seatLimitMessage,
+} from "@rapportini/shared";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import { HttpError, must, parseBody } from "../errors";
-import { randomToken, issueSession } from "../lib/auth";
+import { hashPassword, randomToken, issueSession } from "../lib/auth";
 import { suggestActivity } from "../lib/assistant/setup";
 import { createTenantForUser } from "../lib/bootstrap";
 import { publicCategories, publicPlan } from "../lib/catalog";
 import { prisma } from "../lib/prisma";
 import { loadTeam } from "../lib/seats";
+import { canManagePeople, foundingMembership, isPlatformAdmin } from "../lib/team";
 import { tenantId } from "../plugins/auth";
-import { permit } from "../plugins/guards";
+import { permit, requireOwner } from "../plugins/guards";
+
+const ADMIN_ROLE = "Amministratore";
 
 function idOf(request: { params: unknown }): string {
   return (request.params as { id: string }).id;
 }
 
+async function assertSeat(tx: Prisma.TransactionClient, tenantId: string) {
+  const tenant = await tx.tenant.findUnique({ where: { id: tenantId } });
+  const active = await tx.membership.count({ where: { tenantId, status: "ACTIVE" } });
+  const pending = await tx.invite.count({ where: { tenantId, acceptedAt: null, expiresAt: { gt: new Date() } } });
+  if (!tenant || active + pending >= INCLUDED_SEATS + tenant.extraSeats) throw new HttpError(402, seatLimitMessage());
+}
+
+async function adminRole(tx: Prisma.TransactionClient, tenantId: string) {
+  const existing = await tx.role.findFirst({ where: { tenantId, name: ADMIN_ROLE } });
+  if (existing) return existing;
+  return tx.role.create({ data: { tenantId, name: ADMIN_ROLE, permissions: [...PERMISSIONS], isSystem: false } });
+}
+
 export async function tenantRoutes(app: FastifyInstance) {
+  const owner = [app.requireTenant, requireOwner];
+
   app.get("/categories", async () => publicCategories());
 
   app.get("/categories/:id/plan", async (request) => publicPlan((request.params as { id: string }).id));
@@ -33,10 +61,47 @@ export async function tenantRoutes(app: FastifyInstance) {
   });
 
   app.get("/team", { preHandler: [app.requireTenant, permit("team.manage")] }, async (request) => {
-    return loadTeam(tenantId(request), request.auth!.userId);
+    const id = tenantId(request);
+    const [team, manage] = await Promise.all([loadTeam(id, request.auth!.userId), canManagePeople(id, request.auth!.userId)]);
+    return { ...team, canManage: manage };
   });
 
-  app.post("/team/invites", { preHandler: [app.requireTenant, permit("team.manage")] }, async (request) => {
+  app.post("/team/members", { preHandler: owner }, async (request) => {
+    const body = parseBody(employeeSchema, request.body);
+    const id = tenantId(request);
+    const email = body.email.toLowerCase();
+    if (email.endsWith(".demo")) throw new HttpError(400, "Usa un'email vera");
+    if (await prisma.user.findUnique({ where: { email } })) {
+      throw new HttpError(409, "Esiste già un account con questa email: usa un'altra email");
+    }
+    const passwordHash = await hashPassword(body.password);
+    const member = await prisma.$transaction(async (tx) => {
+      const role = body.access === "admin" ? await adminRole(tx, id) : await tx.role.findFirst({ where: { id: body.roleId, tenantId: id } });
+      if (!role) throw new HttpError(404, "Ruolo non trovato");
+      if (role.isSystem) throw new HttpError(400, "Il titolare è uno solo");
+      await assertSeat(tx, id);
+      const user = await tx.user.create({ data: { email, name: body.name, passwordHash, activeTenantId: id } });
+      return tx.membership.create({ data: { userId: user.id, tenantId: id, roleId: role.id, status: "ACTIVE" }, include: { role: true } });
+    });
+    return { id: member.id, userId: member.userId, name: body.name, email, roleName: member.role.name };
+  });
+
+  app.post("/team/members/:id/password", { preHandler: owner }, async (request) => {
+    const body = parseBody(employeePasswordSchema, request.body);
+    const id = tenantId(request);
+    const member = await must(prisma.membership.findFirst({ where: { id: idOf(request), tenantId: id }, include: { user: true } }), "Utente");
+    const founding = await foundingMembership(id);
+    if (member.id === founding?.id || member.userId === request.auth!.userId) throw new HttpError(400, "La tua password la cambi dal Profilo");
+    const elsewhere = await prisma.membership.count({ where: { userId: member.userId, tenantId: { not: id } } });
+    if (elsewhere || isPlatformAdmin(member.user)) throw new HttpError(403, "Questa persona usa l'account anche altrove: la password la cambia lei dal Profilo");
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: member.userId }, data: { passwordHash: await hashPassword(body.password) } }),
+      prisma.refreshToken.deleteMany({ where: { userId: member.userId } }),
+    ]);
+    return { ok: true };
+  });
+
+  app.post("/team/invites", { preHandler: owner }, async (request) => {
     const body = parseBody(inviteSchema, request.body);
     const id = tenantId(request);
     const email = body.email.toLowerCase();
@@ -46,10 +111,7 @@ export async function tenantRoutes(app: FastifyInstance) {
     const already = await prisma.membership.findFirst({ where: { tenantId: id, user: { email } } });
     if (already) throw new HttpError(409, "Questa persona è già nel negozio");
     const invite = await prisma.$transaction(async (tx) => {
-      const tenant = await tx.tenant.findUnique({ where: { id } });
-      const active = await tx.membership.count({ where: { tenantId: id, status: "ACTIVE" } });
-      const pending = await tx.invite.count({ where: { tenantId: id, acceptedAt: null, expiresAt: { gt: new Date() } } });
-      if (!tenant || active + pending >= INCLUDED_SEATS + tenant.extraSeats) throw new HttpError(402, seatLimitMessage());
+      await assertSeat(tx, id);
       const duplicate = await tx.invite.findFirst({ where: { tenantId: id, email, acceptedAt: null, expiresAt: { gt: new Date() } } });
       if (duplicate) throw new HttpError(409, "C'è già un invito per questa email");
       return tx.invite.create({
@@ -65,18 +127,18 @@ export async function tenantRoutes(app: FastifyInstance) {
     return { id: invite.id, email: invite.email, token: invite.token, expiresAt: invite.expiresAt };
   });
 
-  app.delete("/team/invites/:id", { preHandler: [app.requireTenant, permit("team.manage")] }, async (request) => {
+  app.delete("/team/invites/:id", { preHandler: owner }, async (request) => {
     const id = tenantId(request);
     const invite = await must(prisma.invite.findFirst({ where: { id: idOf(request), tenantId: id, acceptedAt: null } }), "Invito");
     await prisma.invite.delete({ where: { id: invite.id } });
     return { ok: true };
   });
 
-  app.patch("/team/members/:id", { preHandler: [app.requireTenant, permit("team.manage")] }, async (request) => {
+  app.patch("/team/members/:id", { preHandler: owner }, async (request) => {
     const body = parseBody(memberRoleSchema, request.body);
     const id = tenantId(request);
     const member = await must(prisma.membership.findFirst({ where: { id: idOf(request), tenantId: id } }), "Utente");
-    const founding = await prisma.membership.findFirst({ where: { tenantId: id }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    const founding = await foundingMembership(id);
     if (member.id === founding?.id) throw new HttpError(400, "Il titolare del negozio resta collegato");
     const role = await prisma.role.findFirst({ where: { id: body.roleId, tenantId: id } });
     if (!role) throw new HttpError(404, "Ruolo non trovato");
@@ -85,27 +147,24 @@ export async function tenantRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  app.post("/team/members/:id/reactivate", { preHandler: [app.requireTenant, permit("team.manage")] }, async (request) => {
+  app.post("/team/members/:id/reactivate", { preHandler: owner }, async (request) => {
     const id = tenantId(request);
     const member = await must(prisma.membership.findFirst({ where: { id: idOf(request), tenantId: id } }), "Utente");
     if (member.status === "ACTIVE") return { ok: true };
     await prisma.$transaction(async (tx) => {
-      const tenant = await tx.tenant.findUnique({ where: { id } });
-      const active = await tx.membership.count({ where: { tenantId: id, status: "ACTIVE" } });
-      const pending = await tx.invite.count({ where: { tenantId: id, acceptedAt: null, expiresAt: { gt: new Date() } } });
-      if (!tenant || active + pending >= INCLUDED_SEATS + tenant.extraSeats) throw new HttpError(402, seatLimitMessage());
+      await assertSeat(tx, id);
       await tx.membership.update({ where: { id: member.id }, data: { status: "ACTIVE" } });
     });
     return { ok: true };
   });
 
-  app.delete("/team/members/:id", { preHandler: [app.requireTenant, permit("team.manage")] }, async (request) => {
+  app.delete("/team/members/:id", { preHandler: owner }, async (request) => {
     const id = tenantId(request);
     const member = await must(
       prisma.membership.findFirst({ where: { id: idOf(request), tenantId: id }, include: { user: true } }),
       "Utente",
     );
-    const founding = await prisma.membership.findFirst({ where: { tenantId: id }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    const founding = await foundingMembership(id);
     if (member.id === founding?.id) throw new HttpError(400, "Il titolare del negozio resta collegato");
     if (member.userId === request.auth!.userId) throw new HttpError(400, "Non puoi togliere il tuo accesso da qui");
     await prisma.$transaction(async (tx) => {

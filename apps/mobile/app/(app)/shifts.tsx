@@ -7,6 +7,7 @@ import { Button, Card, Fab, Input, ListItem, Pressy, Screen, Sheet, Text, useThe
 import { http } from "../../src/api/client";
 import { queryClient } from "../../src/api/query";
 import { Chip } from "../../src/components/Chip";
+import { DateField } from "../../src/components/DateField";
 import { RecordPicker } from "../../src/components/RecordPicker";
 import { ShiftCalendar, ShiftDayList, shiftColor } from "../../src/components/ShiftCalendar";
 import { QueryState } from "../../src/components/States";
@@ -108,7 +109,7 @@ export default function ShiftsScreen() {
       if (!draft) throw new Error("Niente da salvare");
       if (!draft.userId) throw new Error("Scegli la persona");
       const times = composeShift(draft.day, draft.start, draft.end);
-      if (!times) throw new Error("Scrivi il giorno come 2026-09-26 e gli orari come 09:00");
+      if (!times) throw new Error("Scegli il giorno e gli orari del turno");
       const body = shiftSchema.parse({
         userId: draft.userId,
         roleLabel: draft.roleLabel.trim() || null,
@@ -220,36 +221,31 @@ export default function ShiftsScreen() {
           emptyLabel="Nessuno"
         />
         <Input label="Ruolo" maxLength={40} value={draft?.roleLabel ?? ""} onChangeText={(roleLabel) => setDraft((current) => (current ? { ...current, roleLabel } : current))} placeholder="Sala, cucina…" />
-        <Input
+        <DateField
           label="Giorno"
-          autoCapitalize="none"
-          autoCorrect={false}
-          maxLength={10}
-          placeholder="2026-09-26"
+          clearable={false}
           value={draft?.day ?? ""}
-          onChangeText={(value) => setDraft((current) => (current ? { ...current, day: value } : current))}
+          onChange={(value) => setDraft((current) => (current ? { ...current, day: value } : current))}
         />
         <View style={{ flexDirection: "row", gap: 8 }}>
           <View style={{ flex: 1 }}>
-            <Input
+            <DateField
               label="Dalle"
-              autoCapitalize="none"
-              autoCorrect={false}
-              maxLength={5}
+              mode="time"
+              clearable={false}
               placeholder="09:00"
               value={draft?.start ?? ""}
-              onChangeText={(start) => setDraft((current) => (current ? { ...current, start } : current))}
+              onChange={(start) => setDraft((current) => (current ? { ...current, start } : current))}
             />
           </View>
           <View style={{ flex: 1 }}>
-            <Input
+            <DateField
               label="Alle"
-              autoCapitalize="none"
-              autoCorrect={false}
-              maxLength={5}
+              mode="time"
+              clearable={false}
               placeholder="17:00"
               value={draft?.end ?? ""}
-              onChangeText={(end) => setDraft((current) => (current ? { ...current, end } : current))}
+              onChange={(end) => setDraft((current) => (current ? { ...current, end } : current))}
             />
           </View>
         </View>

@@ -26,12 +26,14 @@ import { prepareDemoTenant } from "../lib/demo";
 import { manifestFor } from "../lib/manifest";
 import { prisma } from "../lib/prisma";
 import { appleRefreshToken, verifyIdentity } from "../lib/social";
+import { isPlatformAdmin } from "../lib/team";
 import { tenantId } from "../plugins/auth";
 
 async function signedIn(user: User) {
   if (user.activeTenantId && isDemoEmail(user.email)) await prepareDemoTenant(user.activeTenantId);
+  const platformAdmin = isPlatformAdmin(user);
+  if (platformAdmin && !user.platformAdmin) await prisma.user.update({ where: { id: user.id }, data: { platformAdmin: true } });
   const session = await issueSession(user.id, user.activeTenantId);
-  const platformAdmin = user.platformAdmin && !user.email.endsWith(".demo");
   return {
     ...session,
     user: { id: user.id, name: user.name, email: user.email, platformAdmin },
@@ -80,17 +82,19 @@ export async function authRoutes(app: FastifyInstance) {
     const body = parseBody(registerSchema, request.body);
     const existing = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } });
     if (existing) throw new HttpError(409, "Email già registrata");
+    const email = body.email.toLowerCase();
     const user = await prisma.user.create({
       data: {
-        email: body.email.toLowerCase(),
+        email,
         name: body.name,
         passwordHash: await hashPassword(body.password),
+        platformAdmin: isPlatformAdmin({ email, platformAdmin: false }),
         termsVersion: LEGAL_VERSION,
         termsAcceptedAt: new Date(),
       },
     });
     const session = await issueSession(user.id, null);
-    return { ...session, user: { id: user.id, name: user.name, email: user.email }, needsOnboarding: true };
+    return { ...session, user: { id: user.id, name: user.name, email: user.email, platformAdmin: user.platformAdmin }, needsOnboarding: true };
   });
 
   app.post("/auth/demo", async (request) => {
@@ -223,7 +227,7 @@ export async function authRoutes(app: FastifyInstance) {
       demo: isDemoEmail(user.email),
       hasPassword: Boolean(user.passwordHash),
       signInWith: [user.appleSub ? "apple" : null, user.googleSub ? "google" : null].filter(Boolean),
-      platformAdmin: user.platformAdmin && !user.email.endsWith(".demo"),
+      platformAdmin: isPlatformAdmin(user),
       activeTenantId: user.activeTenantId,
       memberships: memberships.map((item) => ({
         tenantId: item.tenantId,

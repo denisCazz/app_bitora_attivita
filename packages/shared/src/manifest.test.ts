@@ -231,8 +231,8 @@ describe("buildManifest", () => {
     expect(manifest.tenant.category.path).toEqual(["field_service", "stoves"]);
   });
 
-  it("hides modules the role cannot read", () => {
+  it("hides modules the role cannot read but keeps Altro for profile and team", () => {
     const resolved = resolveCategory([fieldService], defs);
-    expect(buildNavigation(resolved.modules, ["dashboard.view"]).map((item) => item.key)).toEqual(["dashboard"]);
+    expect(buildNavigation(resolved.modules, ["dashboard.view"]).map((item) => item.key)).toEqual(["dashboard", "more"]);
   });
 });

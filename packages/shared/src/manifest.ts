@@ -46,7 +46,9 @@ export interface Manifest {
     tenantName: string;
     roleName: string;
   }>;
-  role: { id: string; name: string; permissions: string[] };
+  role: { id: string; name: string; permissions: string[]; owner?: boolean };
+  /** The owner of the shop or a Bitora platform admin: the only ones who add or remove people. */
+  managesPeople: boolean;
   modules: ManifestModule[];
   needs: NeedView[];
   plan: {
@@ -117,8 +119,7 @@ export function buildNavigation(modules: readonly CatalogModule[], permissions: 
     .filter((module) => module.tab)
     .slice(0, 4)
     .map((module) => ({ key: module.key, label: module.label, icon: module.icon, route: module.route, tab: true }));
-  const overflow = visible.some((module) => !tabs.some((tab) => tab.key === module.key));
-  if (overflow) tabs.push({ key: "more", label: "Altro", icon: "ellipsis-horizontal", route: "/more", tab: true });
+  tabs.push({ key: "more", label: "Altro", icon: "ellipsis-horizontal", route: "/more", tab: true });
   return tabs;
 }
 
@@ -136,6 +137,7 @@ export function buildManifest(input: {
   category: ResolvedCategory;
   memberships: Manifest["memberships"];
   role: Manifest["role"];
+  managesPeople?: boolean;
   moduleStates: readonly ModuleState[];
   customFields: CustomFieldDTO[];
   extraSeats?: number;
@@ -198,7 +200,8 @@ export function buildManifest(input: {
       needs,
     },
     memberships: input.memberships,
-    role: input.role,
+    role: { ...input.role, owner: input.role.owner ?? false },
+    managesPeople: input.managesPeople ?? false,
     modules,
     needs: category.needs,
     plan: {

@@ -9,7 +9,7 @@ import { Button, Glass, Input, Text, ThemeProvider } from "@rapportini/ui";
 import { http } from "../../src/api/client";
 import { queryClient } from "../../src/api/query";
 import { offerBiometric } from "../../src/auth/biometric";
-import { useAuth } from "../../src/auth/store";
+import { rememberUser, useAuth } from "../../src/auth/store";
 import { LegalConsents } from "../../src/components/LegalConsents";
 import { BrandMark, PhotoStage, useSlide } from "../../src/components/PhotoStage";
 import { SocialButtons, type SignInSession } from "../../src/components/SocialButtons";
@@ -32,23 +32,31 @@ function RegisterForm({ accent }: { accent: string }) {
   const setSession = useAuth((state) => state.setSession);
   const form = useForm({
     resolver: zodResolver(registerSchema),
-    defaultValues: { name: "", email: "", password: "", acceptTerms: false as boolean as true, approveClauses: false as boolean as true },
+    defaultValues: { name: "", company: "", email: "", password: "", acceptTerms: false as boolean as true, approveClauses: false as boolean as true },
   });
-  const [acceptTerms, approveClauses] = form.watch(["acceptTerms", "approveClauses"]);
+  const [acceptTerms, approveClauses, company] = form.watch(["acceptTerms", "approveClauses", "company"]);
+
+  function toOnboarding() {
+    const shop = company?.trim();
+    router.replace(shop ? { pathname: "/(onboarding)", params: { shop } } : "/(onboarding)");
+  }
 
   const onSubmit = form.handleSubmit(async (values) => {
     const session = await http.post<{ accessToken: string; refreshToken: string }>("/auth/register", values);
     await setSession(session.accessToken, session.refreshToken);
-    router.replace("/(onboarding)");
+    await rememberUser({ name: values.name, email: values.email.trim().toLowerCase() });
+    toOnboarding();
     void offerBiometric();
   });
 
   /** Signing up with Apple or Google on an email that already exists simply signs in. */
   async function enterSocial(session: SignInSession) {
     await setSession(session.accessToken, session.refreshToken);
+    await rememberUser(session.user);
     await queryClient.invalidateQueries({ queryKey: ["manifest"] });
     if (session.user.platformAdmin && !session.activeTenantId) router.replace("/(app)/admin");
-    else router.replace(session.needsOnboarding ? "/(onboarding)" : "/");
+    else if (session.needsOnboarding) toOnboarding();
+    else router.replace("/");
     void offerBiometric();
   }
 
@@ -76,6 +84,13 @@ function RegisterForm({ accent }: { accent: string }) {
           <Animated.View entering={FadeInDown.delay(240).springify().damping(18)}>
             <Glass blur tint="dark" intensity={55} rounded={28} style={{ padding: 18, gap: 14 }}>
               <Controller control={form.control} name="name" render={({ field, fieldState }) => <Input label={t("name")} autoComplete="name" value={field.value} onChangeText={field.onChange} error={fieldState.error?.message} />} />
+              <Controller
+                control={form.control}
+                name="company"
+                render={({ field, fieldState }) => (
+                  <Input label={t("company")} autoComplete="organization" textContentType="organizationName" value={field.value ?? ""} onChangeText={field.onChange} error={fieldState.error?.message} />
+                )}
+              />
               <Controller
                 control={form.control}
                 name="email"

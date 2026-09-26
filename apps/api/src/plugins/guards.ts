@@ -2,6 +2,7 @@ import { moduleStatus, type ModuleKey, type Permission } from "@rapportini/share
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { categoryOfTenant } from "../lib/catalog";
 import { prisma } from "../lib/prisma";
+import { canManagePeople, isPlatformAdmin } from "../lib/team";
 
 export function permit(...permissions: Permission[]) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
@@ -37,5 +38,13 @@ export function moduleGuard(key: ModuleKey) {
 export async function requirePlatformAdmin(request: FastifyRequest, reply: FastifyReply) {
   const userId = request.auth?.userId;
   const user = userId ? await prisma.user.findUnique({ where: { id: userId }, select: { platformAdmin: true, email: true } }) : null;
-  if (!user?.platformAdmin || user.email.endsWith(".demo")) reply.code(403).send({ error: "Solo per il team Bitora" });
+  if (!user || !isPlatformAdmin(user)) reply.code(403).send({ error: "Solo per il team Bitora" });
+}
+
+export async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
+  const tenantId = request.auth?.tenantId;
+  const userId = request.auth?.userId;
+  if (!tenantId || !userId || !(await canManagePeople(tenantId, userId))) {
+    reply.code(403).send({ error: "Solo il titolare può gestire i dipendenti" });
+  }
 }

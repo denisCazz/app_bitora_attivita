@@ -7,20 +7,24 @@ export function QueryState({
   isLoading,
   error,
   refetch,
+  placeholder,
   children,
 }: {
   isLoading: boolean;
   error: Error | null;
   refetch?: () => void;
+  placeholder?: ReactNode;
   children: ReactNode;
 }) {
   if (isLoading) {
     return (
-      <View style={{ gap: 12 }}>
-        <Skeleton height={72} />
-        <Skeleton height={72} />
-        <Skeleton height={72} />
-      </View>
+      placeholder ?? (
+        <View style={{ gap: 12 }}>
+          <Skeleton height={72} />
+          <Skeleton height={72} />
+          <Skeleton height={72} />
+        </View>
+      )
     );
   }
   if (error) {

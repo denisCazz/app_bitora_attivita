@@ -6,6 +6,7 @@ import { Badge, Button, Card, EmptyState, Fab, Input, Screen, Sheet, Text } from
 import { http } from "../../src/api/client";
 import { queryClient } from "../../src/api/query";
 import { Chip } from "../../src/components/Chip";
+import { DateField } from "../../src/components/DateField";
 import { RecordPicker } from "../../src/components/RecordPicker";
 import { QueryState } from "../../src/components/States";
 import { fromLocalInput, toLocalInput, when } from "../../src/format";
@@ -69,7 +70,7 @@ export default function CalendarScreen() {
       if (!draft) throw new Error("Niente da salvare");
       const dueAt = fromLocalInput(draft.dueAt);
       if (!draft.kind) throw new Error("Scegli il tipo");
-      if (!dueAt) throw new Error("Scrivi la data, per esempio 2026-09-26T09:00");
+      if (!dueAt) throw new Error("Scegli la data");
       const minutes = draft.minutes.trim() ? Number(draft.minutes) : null;
       if (minutes !== null && !(Number.isInteger(minutes) && minutes >= 5 && minutes <= 720)) throw new Error("La durata va da 5 a 720 minuti");
       const body = scheduleSchema.parse({
@@ -161,7 +162,7 @@ export default function CalendarScreen() {
         }}
       >
         <Input label="Titolo" value={draft?.title ?? ""} onChangeText={(title) => setDraft((current) => (current ? { ...current, title } : current))} />
-        <Input label="Quando" value={draft?.dueAt ?? ""} onChangeText={(dueAt) => setDraft((current) => (current ? { ...current, dueAt } : current))} />
+        <DateField label="Quando" mode="datetime" value={draft?.dueAt ?? ""} onChange={(dueAt) => setDraft((current) => (current ? { ...current, dueAt } : current))} />
         <Input
           label="Durata (minuti)"
           keyboardType="number-pad"

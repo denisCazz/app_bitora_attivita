@@ -10,7 +10,7 @@ import { queryClient } from "../../src/api/query";
 import { useAuth } from "../../src/auth/store";
 import { daysLeft, monthly } from "../../src/billing";
 import { t } from "../../src/i18n";
-import { modulePermitted, useManifest } from "../../src/session";
+import { can, modulePermitted, useManifest } from "../../src/session";
 
 function initials(name: string) {
   const parts = name.split(/\s+/).filter(Boolean);
@@ -119,6 +119,8 @@ export default function MoreScreen() {
   const name = manifest.data?.user.name ?? "Profilo";
   const email = manifest.data?.user.email;
   const role = manifest.data?.role.name;
+  const showTeam = Boolean(manifest.data?.managesPeople) || can(manifest.data, "team.manage");
+  const showSettings = can(manifest.data, "settings.manage");
 
   function titleOf(key: string, label: string) {
     if (key === "work_orders") return terms?.workOrders ?? label;
@@ -208,6 +210,25 @@ export default function MoreScreen() {
           <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.92)" />
         </View>
       </Pressy>
+
+      {showTeam || showSettings ? (
+        <View style={{ gap: 8 }}>
+          <Text variant="title">Gestione</Text>
+          <Menu>
+            {showTeam ? (
+              <MenuRow
+                icon="people-outline"
+                title="Dipendenti"
+                subtitle={manifest.data?.managesPeople ? "Aggiungi dipendenti e amministratori" : "Chi lavora nel negozio"}
+                onPress={() => router.push("/(app)/settings/team")}
+              />
+            ) : null}
+            {showSettings ? (
+              <MenuRow icon="settings-outline" title="Impostazioni" subtitle="Logo, ruoli, campi, moduli e incassi" onPress={() => router.push("/(app)/settings")} />
+            ) : null}
+          </Menu>
+        </View>
+      ) : null}
 
       {open.length ? (
         <Menu>

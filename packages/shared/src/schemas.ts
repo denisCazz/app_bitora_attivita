@@ -13,6 +13,7 @@ const approveClauses = () => z.literal(true, { errorMap: () => ({ message: "Per 
 
 export const registerSchema = z.object({
   name: z.string().trim().min(2).max(80),
+  company: z.string().trim().max(80).optional(),
   email: z.string().trim().email(),
   password: z.string().min(8).max(80),
   acceptTerms: acceptTerms(),
@@ -430,6 +431,22 @@ export const customFieldDefSchema = z.object({
 export const inviteSchema = z.object({
   email: z.string().trim().email(),
   roleId: z.string(),
+});
+
+export const EMPLOYEE_ACCESS = ["employee", "admin"] as const;
+
+export const employeeSchema = z
+  .object({
+    name: z.string().trim().min(2, "Scrivi nome e cognome").max(80),
+    email: z.string().trim().email("Email non valida"),
+    password: z.string().min(8, "La password deve avere almeno 8 caratteri").max(80),
+    access: z.enum(EMPLOYEE_ACCESS),
+    roleId: z.string().optional(),
+  })
+  .refine((value) => value.access === "admin" || Boolean(value.roleId), { message: "Scegli il ruolo", path: ["roleId"] });
+
+export const employeePasswordSchema = z.object({
+  password: z.string().min(8, "La password deve avere almeno 8 caratteri").max(80),
 });
 
 export const acceptInviteSchema = z.object({

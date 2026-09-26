@@ -63,6 +63,7 @@ export type WorkOrderReport = {
 export type WorkOrderPdfContext = {
   shopName: string;
   shopAddress?: string | null;
+  logoUrl?: string | null;
   accent?: string | null;
   documentTitle: string;
   labels: {
@@ -77,9 +78,11 @@ export type WorkOrderPdfContext = {
 type Photo = { name: string; data: Buffer };
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/jpg", "image/png"]);
+const LOGO_SIZE = 48;
 
 export async function renderWorkOrderPdf(report: WorkOrderReport, context: WorkOrderPdfContext): Promise<Buffer> {
   const photos = await loadPhotos(report.attachments);
+  const logo = context.logoUrl && /\.(png|jpe?g)$/i.test(context.logoUrl.split("?")[0] ?? "") ? await readUpload(context.logoUrl) : null;
   const accent = /^#[0-9A-Fa-f]{6}$/.test(context.accent ?? "") ? context.accent! : DEFAULT_ACCENT;
   const code = report.id.replace(/[^a-z0-9]/gi, "").slice(-8).toUpperCase();
 
@@ -132,13 +135,25 @@ export async function renderWorkOrderPdf(report: WorkOrderReport, context: WorkO
     }
 
     const shopLines = context.shopAddress ? 2 : 1;
-    ensure(28 + shopLines * 16);
+    ensure(Math.max(28 + shopLines * 16, LOGO_SIZE));
     const rightX = left + width * 0.56;
     const rightW = width * 0.44;
-    text(context.shopName, left, y, 16, { font: "Helvetica-Bold", width: width * 0.52 });
+    let shopX = left;
+    let logoBottom = y;
+    if (logo) {
+      try {
+        doc.image(logo, left, y, { fit: [LOGO_SIZE, LOGO_SIZE], valign: "center" });
+        shopX = left + LOGO_SIZE + 10;
+        logoBottom = y + LOGO_SIZE;
+      } catch {
+        shopX = left;
+      }
+    }
+    const shopW = width * 0.52 - (shopX - left);
+    text(context.shopName, shopX, y, 16, { font: "Helvetica-Bold", width: shopW });
     const shopBottom = doc.y;
-    if (context.shopAddress) text(context.shopAddress, left, shopBottom + 2, 9, { color: MUTED, width: width * 0.52 });
-    const headerLeftBottom = doc.y;
+    if (context.shopAddress) text(context.shopAddress, shopX, shopBottom + 2, 9, { color: MUTED, width: shopW });
+    const headerLeftBottom = Math.max(doc.y, logoBottom);
     text(context.documentTitle, rightX, y, 9, { font: "Helvetica-Bold", color: accent, width: rightW, align: "right" });
     text(`n. ${code}`, rightX, doc.y + 2, 12, { font: "Helvetica-Bold", width: rightW, align: "right" });
     text(formatWhen(new Date()) ?? "", rightX, doc.y + 2, 9, { color: MUTED, width: rightW, align: "right" });

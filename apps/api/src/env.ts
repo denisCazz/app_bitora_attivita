@@ -58,6 +58,10 @@ export const env = {
   stripeSecretKey: process.env.STRIPE_SECRET_KEY,
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
   billingDemo: process.env.BILLING_DEMO === "true",
+  platformAdminEmails: (process.env.PLATFORM_ADMIN_EMAILS ?? "deniscazzulo@icloud.com")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
   apple: {
     bundleId: process.env.APPLE_BUNDLE_ID ?? "app.bitora.mobile",
     appAppleId: process.env.APPLE_APP_ID ? Number(process.env.APPLE_APP_ID) : undefined,

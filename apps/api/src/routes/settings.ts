@@ -3,8 +3,12 @@ import { categoryOfTenant } from "../lib/catalog";
 import type { FastifyInstance } from "fastify";
 import { HttpError, must, parseBody } from "../errors";
 import { prisma, tenantDb } from "../lib/prisma";
+import { removeUpload, saveUpload } from "../lib/storage";
 import { tenantId } from "../plugins/auth";
 import { permit } from "../plugins/guards";
+
+const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 
 function idOf(request: { params: unknown }): string {
   return (request.params as { id: string }).id;
@@ -102,6 +106,32 @@ export async function settingsRoutes(app: FastifyInstance) {
     const tenant = await must(prisma.tenant.findUnique({ where: { id } }), "Negozio");
     const branding = { ...(tenant.branding as object), ...body };
     return prisma.tenant.update({ where: { id }, data: { branding } });
+  });
+
+  app.post("/settings/logo", { preHandler: manage }, async (request) => {
+    const file = await request.file();
+    if (!file) throw new HttpError(400, "File mancante");
+    const mimeType = file.mimetype === "application/octet-stream" && /\.(jpe?g)$/i.test(file.filename) ? "image/jpeg" : file.mimetype;
+    if (!LOGO_TYPES.has(mimeType)) throw new HttpError(400, "Il logo deve essere un'immagine PNG, JPG o WebP");
+    const data = await file.toBuffer();
+    if (!data.length) throw new HttpError(400, "Il file è vuoto");
+    if (data.length > LOGO_MAX_BYTES) throw new HttpError(413, "Il logo è troppo grande: massimo 2 MB");
+    const id = tenantId(request);
+    const tenant = await must(prisma.tenant.findUnique({ where: { id } }), "Negozio");
+    const previous = (tenant.branding as { logoUrl?: string | null }).logoUrl;
+    const logoUrl = await saveUpload(file.filename, mimeType, data);
+    await prisma.tenant.update({ where: { id }, data: { branding: { ...(tenant.branding as object), logoUrl } } });
+    if (previous) await removeUpload(previous).catch(() => undefined);
+    return { logoUrl };
+  });
+
+  app.delete("/settings/logo", { preHandler: manage }, async (request) => {
+    const id = tenantId(request);
+    const tenant = await must(prisma.tenant.findUnique({ where: { id } }), "Negozio");
+    const previous = (tenant.branding as { logoUrl?: string | null }).logoUrl;
+    await prisma.tenant.update({ where: { id }, data: { branding: { ...(tenant.branding as object), logoUrl: null } } });
+    if (previous) await removeUpload(previous).catch(() => undefined);
+    return { ok: true };
   });
 
   app.patch("/settings/needs", { preHandler: manage }, async (request) => {

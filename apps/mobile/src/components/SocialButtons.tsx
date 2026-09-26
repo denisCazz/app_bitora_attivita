@@ -11,7 +11,7 @@ export type SignInSession = {
   refreshToken: string;
   needsOnboarding: boolean;
   activeTenantId: string | null;
-  user: { platformAdmin: boolean };
+  user: { name: string; email: string; platformAdmin: boolean };
 };
 
 const HEIGHT = 50;

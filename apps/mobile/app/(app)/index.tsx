@@ -1,12 +1,13 @@
 import { isUsable, type ManifestModule } from "@rapportini/shared";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { StyleSheet, Switch, View } from "react-native";
-import { Badge, Button, Card, Pressy, Screen, Sheet, Text, useTheme } from "@rapportini/ui";
-import { http } from "../../src/api/client";
+import { Badge, Button, Card, Pressy, Screen, Sheet, Skeleton, Text, useTheme } from "@rapportini/ui";
+import { http, mediaUrl } from "../../src/api/client";
 import { monthly, useLockedModules } from "../../src/billing";
 import { QueryState } from "../../src/components/States";
 import { when } from "../../src/format";
@@ -34,6 +35,7 @@ export default function HomeScreen() {
   const manifest = useManifest();
   const router = useRouter();
   const terms = manifest.data?.tenant.terminology;
+  const logoUrl = manifest.data?.tenant.branding.logoUrl;
   const moduleOf = (key: string) => manifest.data?.modules.find((module) => module.key === key);
   const usable = (key: string) => {
     const module = moduleOf(key);
@@ -85,10 +87,17 @@ export default function HomeScreen() {
         <LinearGradient colors={[theme.colors.accent, theme.colors.accentAlt]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
         <LinearGradient colors={["rgba(255,255,255,0.25)", "rgba(255,255,255,0)"]} end={{ x: 0.2, y: 0.8 }} style={StyleSheet.absoluteFill} />
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
-          <View style={{ flexShrink: 1, borderRadius: 99, backgroundColor: "rgba(255,255,255,0.18)", paddingHorizontal: 10, paddingVertical: 4 }}>
-            <Text variant="caption" numberOfLines={1} style={{ color: "#fff", fontWeight: "700" }}>
-              {manifest.data?.tenant.name} · {manifest.data?.role.name}
-            </Text>
+          <View style={{ flexShrink: 1, flexDirection: "row", alignItems: "center", gap: 10 }}>
+            {logoUrl ? (
+              <View style={{ width: 40, height: 40, borderRadius: 12, borderCurve: "continuous", backgroundColor: "#fff", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                <Image source={{ uri: mediaUrl(logoUrl) }} style={{ width: 34, height: 34 }} contentFit="contain" accessibilityLabel={`Logo ${manifest.data?.tenant.name ?? ""}`} />
+              </View>
+            ) : null}
+            <View style={{ flexShrink: 1, borderRadius: 99, backgroundColor: "rgba(255,255,255,0.18)", paddingHorizontal: 10, paddingVertical: 4 }}>
+              <Text variant="caption" numberOfLines={1} style={{ color: "#fff", fontWeight: "700" }}>
+                {manifest.data?.tenant.name} · {manifest.data?.role.name}
+              </Text>
+            </View>
           </View>
           <Pressy
             accessibilityRole="button"
@@ -135,7 +144,15 @@ export default function HomeScreen() {
           </Pressy>
         ) : null}
       </View>
-      {shown.length ? (
+      {!homeActions.ready && candidates.length ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+          {candidates.slice(0, 4).map((module) => (
+            <View key={module.key} style={{ flexBasis: "45%", flexGrow: 1 }}>
+              <Skeleton height={104} radius={theme.radius.lg} />
+            </View>
+          ))}
+        </View>
+      ) : shown.length ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
           {shown.map((module) => {
             const title = moduleTitle(module);
@@ -219,7 +236,25 @@ export default function HomeScreen() {
         {homeActions.selected ? <Button tone="ghost" label="Mostra tutte" onPress={() => void homeActions.save(null)} /> : null}
       </Sheet>
 
-      <QueryState isLoading={dashboard.isLoading} error={dashboard.error} refetch={() => dashboard.refetch()}>
+      <QueryState
+        isLoading={dashboard.isLoading}
+        error={dashboard.error}
+        refetch={() => dashboard.refetch()}
+        placeholder={
+          <View style={{ gap: 16 }}>
+            <View style={{ flexDirection: "row", gap: 12 }}>
+              <View style={{ flex: 1 }}>
+                <Skeleton height={118} radius={theme.radius.lg} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Skeleton height={118} radius={theme.radius.lg} />
+              </View>
+            </View>
+            <Skeleton height={22} width="40%" />
+            <Skeleton height={76} radius={theme.radius.lg} />
+          </View>
+        }
+      >
         <View style={{ flexDirection: "row", gap: 12 }}>
           {stats.map((stat) => (
               <Card key={stat.key} style={{ flex: 1, gap: 4 }}>

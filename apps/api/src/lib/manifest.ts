@@ -3,6 +3,7 @@ import { buildManifest, isModuleKey, type CustomFieldDTO, type ModuleKey, type T
 import { HttpError } from "../errors";
 import { resolvedCategory } from "./catalog";
 import { prisma } from "./prisma";
+import { foundingMembership, isPlatformAdmin } from "./team";
 
 function asOptions(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
@@ -28,7 +29,7 @@ export async function manifestFor(userId: string, tenantId: string) {
   });
   if (!user || !membership || membership.status !== "ACTIVE") throw new HttpError(404, "Negozio non trovato");
 
-  const [memberships, modules, fields, category] = await Promise.all([
+  const [memberships, modules, fields, category, founding] = await Promise.all([
     prisma.membership.findMany({
       where: { userId, status: "ACTIVE" },
       include: { tenant: true, role: true },
@@ -37,7 +38,9 @@ export async function manifestFor(userId: string, tenantId: string) {
     prisma.tenantModule.findMany({ where: { tenantId } }),
     prisma.customFieldDef.findMany({ where: { tenantId }, orderBy: { label: "asc" } }),
     resolvedCategory(membership.tenant.categoryId),
+    foundingMembership(tenantId),
   ]);
+  const platformAdmin = isPlatformAdmin(user);
 
   const settings = (membership.tenant.settings ?? {}) as {
     terminology?: Partial<Terminology>;
@@ -47,7 +50,7 @@ export async function manifestFor(userId: string, tenantId: string) {
   const branding = (membership.tenant.branding ?? {}) as { accent?: string; logoUrl?: string | null };
 
   return buildManifest({
-    user: { id: user.id, name: user.name, email: user.email, platformAdmin: user.platformAdmin && !user.email.endsWith(".demo") },
+    user: { id: user.id, name: user.name, email: user.email, platformAdmin },
     tenant: {
       id: membership.tenant.id,
       name: membership.tenant.name,
@@ -63,7 +66,8 @@ export async function manifestFor(userId: string, tenantId: string) {
       tenantName: item.tenant.name,
       roleName: item.role.name,
     })),
-    role: { id: membership.role.id, name: membership.role.name, permissions: membership.role.permissions },
+    role: { id: membership.role.id, name: membership.role.name, permissions: membership.role.permissions, owner: founding?.id === membership.id },
+    managesPeople: founding?.id === membership.id || platformAdmin,
     moduleStates: modules
       .filter((module) => isModuleKey(module.moduleKey))
       .map((module) => ({

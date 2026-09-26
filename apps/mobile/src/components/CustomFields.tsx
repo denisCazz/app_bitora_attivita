@@ -1,6 +1,7 @@
 import type { CustomFieldDTO } from "@rapportini/shared";
 import { Pressable, View } from "react-native";
 import { Input, Text, useTheme } from "@rapportini/ui";
+import { DateField } from "./DateField";
 
 export function CustomFields({
   entity,
@@ -44,13 +45,15 @@ export function CustomFields({
               })}
             </View>
           </View>
+        ) : field.type === "DATE" ? (
+          <DateField key={field.id} label={field.label} value={values[field.key] ?? ""} onChange={(text) => onChange({ ...values, [field.key]: text })} />
         ) : (
           <Input
             key={field.id}
             label={field.label}
             value={values[field.key] ?? ""}
             keyboardType={field.type === "NUMBER" ? "decimal-pad" : "default"}
-            placeholder={field.type === "DATE" ? "2026-09-25" : field.type === "PHOTO" ? "Link della foto" : ""}
+            placeholder={field.type === "PHOTO" ? "Link della foto" : ""}
             onChangeText={(text) => onChange({ ...values, [field.key]: text })}
           />
         ),

@@ -11,6 +11,7 @@ import { queryClient } from "../../../src/api/query";
 import { Chip } from "../../../src/components/Chip";
 import { RecordPicker } from "../../../src/components/RecordPicker";
 import { CustomFields } from "../../../src/components/CustomFields";
+import { DateField } from "../../../src/components/DateField";
 import { QueryState } from "../../../src/components/States";
 import { fromLocalInput } from "../../../src/format";
 import { useManifest } from "../../../src/session";
@@ -85,7 +86,7 @@ export default function AssetsScreen() {
         <Controller control={form.control} name="brand" render={({ field }) => <Input label="Marca" value={field.value ?? ""} onChangeText={field.onChange} />} />
         <Controller control={form.control} name="model" render={({ field }) => <Input label="Modello" value={field.value ?? ""} onChangeText={field.onChange} />} />
         <Controller control={form.control} name="serialNumber" render={({ field }) => <Input label="Matricola" value={field.value ?? ""} onChangeText={field.onChange} />} />
-        <Input label="Installato il" value={installedAt} onChangeText={setInstalledAt} />
+        <DateField label="Installato il" value={installedAt} onChange={setInstalledAt} />
         <Controller control={form.control} name="notes" render={({ field }) => <Input label="Note" value={field.value ?? ""} onChangeText={field.onChange} multiline />} />
         <RecordPicker
           label={terms?.customer ?? "Cliente"}

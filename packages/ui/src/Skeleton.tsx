@@ -2,7 +2,15 @@ import { useEffect, useRef } from "react";
 import { Animated, View } from "react-native";
 import { useTheme } from "./theme";
 
-export function Skeleton({ height = 18, width = "100%" as number | `${number}%` }) {
+export function Skeleton({
+  height = 18,
+  width = "100%" as number | `${number}%`,
+  radius,
+}: {
+  height?: number;
+  width?: number | `${number}%`;
+  radius?: number;
+}) {
   const theme = useTheme();
   const opacity = useRef(new Animated.Value(0.4)).current;
   useEffect(() => {
@@ -17,7 +25,7 @@ export function Skeleton({ height = 18, width = "100%" as number | `${number}%` 
   }, [opacity]);
   return (
     <Animated.View style={{ opacity }}>
-      <View style={{ height, width, borderRadius: theme.radius.sm, borderCurve: "continuous", backgroundColor: theme.colors.glassSolid }} />
+      <View style={{ height, width, borderRadius: radius ?? theme.radius.sm, borderCurve: "continuous", backgroundColor: theme.colors.glassSolid }} />
     </Animated.View>
   );
 }

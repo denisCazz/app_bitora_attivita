@@ -1,7 +1,7 @@
 import { DEFAULT_ACCENT, GENERIC_CATEGORY_KEY, needsFromModules, planModules, type ActivityProposal } from "@rapportini/shared";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useState, type ReactNode } from "react";
@@ -12,6 +12,7 @@ import { api, http } from "../../src/api/client";
 import { queryClient } from "../../src/api/query";
 import { useAuth } from "../../src/auth/store";
 import { categoryImageFor } from "../../src/categoryImages";
+import { EmployeeForm, type AssignableRole } from "../../src/components/EmployeeForm";
 import { defaultTrials, NeedPicker, PlanPreview, type PublicPlan } from "../../src/components/PlanPicker";
 import { QueryState } from "../../src/components/States";
 import { t } from "../../src/i18n";
@@ -182,12 +183,10 @@ function OnboardingSteps({
   const [brief, setBrief] = useState("");
   const [setup, setSetup] = useState<ActivityProposal | null>(null);
   const [reading, setReading] = useState(false);
-  const [shop, setShop] = useState("");
+  const params = useLocalSearchParams<{ shop?: string }>();
+  const [shop, setShop] = useState(typeof params.shop === "string" ? params.shop : "");
   const [city, setCity] = useState("");
-  const [email, setEmail] = useState("");
-  const [roles, setRoles] = useState<Array<{ id: string; name: string }>>([]);
-  const [roleId, setRoleId] = useState("");
-  const [invite, setInvite] = useState("");
+  const [roles, setRoles] = useState<AssignableRole[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const plan = useQuery({
@@ -245,23 +244,9 @@ function OnboardingSteps({
         ...(generic && setup ? { setup } : {}),
       });
       await setSession(created.accessToken, created.refreshToken);
-      const list = await http.get<Array<{ id: string; name: string }>>("/roles");
-      setRoles(list.filter((role) => role.name !== "Titolare"));
-      setRoleId(list.find((role) => role.name !== "Titolare")?.id ?? "");
+      const list = await http.get<Array<AssignableRole & { isSystem: boolean }>>("/roles");
+      setRoles(list.filter((role) => !role.isSystem));
       setStep(3);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Errore");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function sendInvite() {
-    if (!email || !roleId) return finish();
-    setLoading(true);
-    try {
-      const result = await http.post<{ token: string }>("/team/invites", { email, roleId });
-      setInvite(result.token);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Errore");
     } finally {
@@ -364,17 +349,9 @@ function OnboardingSteps({
       {step === 3 ? (
         <View style={{ gap: 14 }}>
           <Text variant="display">{t("teamTitle")}</Text>
-          <Text muted>Tre utenti sono inclusi. Dal quarto, 5€ al mese per utente. Puoi invitare anche dopo, dalle impostazioni.</Text>
-          <Input label={t("email")} autoCapitalize="none" value={email} onChangeText={setEmail} />
-          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-            {roles.map((role) => (
-              <Button key={role.id} label={role.name} tone={roleId === role.id ? "primary" : "secondary"} onPress={() => setRoleId(role.id)} />
-            ))}
-          </View>
-          {invite ? <Text>Codice invito: {invite}</Text> : null}
-          {error ? <Text style={{ color: theme.colors.danger }}>{error}</Text> : null}
-          <Button label="Invia invito" tone="secondary" loading={loading} onPress={() => void sendInvite()} />
-          <Button label="Apri l'app" onPress={() => void finish()} />
+          <Text muted>Tre utenti sono inclusi. Dal quarto, 5€ al mese per utente. Puoi aggiungerli anche dopo, da Altro › Dipendenti.</Text>
+          <EmployeeForm roles={roles} />
+          <Button label="Apri l'app" tone="secondary" onPress={() => void finish()} />
         </View>
       ) : null}
     </Screen>

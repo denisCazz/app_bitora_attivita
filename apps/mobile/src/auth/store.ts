@@ -26,6 +26,33 @@ async function remove(key: string): Promise<void> {
   await SecureStore.deleteItemAsync(key);
 }
 
+const LAST_USER = "rapportini.lastUser";
+
+export interface RememberedUser {
+  name: string;
+  email: string;
+}
+
+/** Who signed in last on this device. Survives logout so the login screen can greet them. */
+export async function rememberUser(user: RememberedUser): Promise<void> {
+  if (user.email.toLowerCase().endsWith(".demo")) return;
+  await write(LAST_USER, JSON.stringify({ name: user.name, email: user.email })).catch(() => undefined);
+}
+
+export async function loadRememberedUser(): Promise<RememberedUser | null> {
+  try {
+    const raw = await read(LAST_USER);
+    const parsed = raw ? (JSON.parse(raw) as Partial<RememberedUser>) : null;
+    return parsed?.name && parsed.email ? { name: parsed.name, email: parsed.email } : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function forgetRememberedUser(): Promise<void> {
+  await remove(LAST_USER).catch(() => undefined);
+}
+
 interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;

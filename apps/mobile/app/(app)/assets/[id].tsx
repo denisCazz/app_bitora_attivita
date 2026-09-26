@@ -7,6 +7,7 @@ import { Button, Card, Input, ListItem, Screen, Sheet, Text } from "@rapportini/
 import { http } from "../../../src/api/client";
 import { queryClient } from "../../../src/api/query";
 import { Chip } from "../../../src/components/Chip";
+import { DateField } from "../../../src/components/DateField";
 import { RecordPicker } from "../../../src/components/RecordPicker";
 import { QueryState } from "../../../src/components/States";
 import { fromLocalInput, STATUS_LABEL, toLocalInput, when } from "../../../src/format";
@@ -59,7 +60,7 @@ export default function AssetScreen() {
     mutationFn: () => {
       const dueAt = fromLocalInput(plan.dueAt);
       if (!plan.kind) throw new Error("Scegli il tipo");
-      if (!dueAt) throw new Error("Scrivi la data, per esempio 2026-09-26T09:00");
+      if (!dueAt) throw new Error("Scegli la data");
       return http.post("/schedules", scheduleSchema.parse({ assetId: id, kind: plan.kind, title: plan.title, dueAt, intervalMonths: plan.interval.trim() ? Number(plan.interval) : null }));
     },
     onSuccess: () => {
@@ -73,7 +74,7 @@ export default function AssetScreen() {
       if (!planEdit) throw new Error("Niente da salvare");
       const dueAt = fromLocalInput(planEdit.dueAt);
       if (!planEdit.kind) throw new Error("Scegli il tipo");
-      if (!dueAt) throw new Error("Scrivi la data, per esempio 2026-09-26T09:00");
+      if (!dueAt) throw new Error("Scegli la data");
       return http.patch(
         `/schedules/${planEdit.id}`,
         scheduleSchema.parse({ assetId: id, kind: planEdit.kind, title: planEdit.title, dueAt, intervalMonths: planEdit.interval.trim() ? Number(planEdit.interval) : null }),
@@ -150,7 +151,7 @@ export default function AssetScreen() {
             <Card style={{ gap: 8 }}>
               <Text variant="heading">Nuova scadenza</Text>
               <Input label="Titolo" value={plan.title} onChangeText={(title) => setPlan({ ...plan, title })} />
-              <Input label="Quando" value={plan.dueAt} onChangeText={(dueAt) => setPlan({ ...plan, dueAt })} />
+              <DateField label="Quando" mode="datetime" value={plan.dueAt} onChange={(dueAt) => setPlan({ ...plan, dueAt })} />
               <Input label="Ogni quanti mesi" keyboardType="number-pad" value={plan.interval} onChangeText={(interval) => setPlan({ ...plan, interval })} />
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 {scheduleKinds.map(({ key, label }) => (
@@ -162,7 +163,7 @@ export default function AssetScreen() {
             </Card>
             <Sheet visible={Boolean(planEdit)} title="Modifica scadenza" onClose={() => setPlanEdit(null)}>
               <Input label="Titolo" value={planEdit?.title ?? ""} onChangeText={(title) => setPlanEdit((current) => (current ? { ...current, title } : current))} />
-              <Input label="Quando" value={planEdit?.dueAt ?? ""} onChangeText={(dueAt) => setPlanEdit((current) => (current ? { ...current, dueAt } : current))} />
+              <DateField label="Quando" mode="datetime" value={planEdit?.dueAt ?? ""} onChange={(dueAt) => setPlanEdit((current) => (current ? { ...current, dueAt } : current))} />
               <Input
                 label="Ogni quanti mesi"
                 keyboardType="number-pad"
@@ -193,7 +194,7 @@ export default function AssetScreen() {
               <Input label="Marca" value={draft.brand} onChangeText={(brand) => setDraft({ ...draft, brand })} />
               <Input label="Modello" value={draft.model} onChangeText={(model) => setDraft({ ...draft, model })} />
               <Input label="Matricola" value={draft.serialNumber} onChangeText={(serialNumber) => setDraft({ ...draft, serialNumber })} />
-              <Input label="Installato il" value={draft.installedAt} onChangeText={(installedAt) => setDraft({ ...draft, installedAt })} />
+              <DateField label="Installato il" value={draft.installedAt} onChange={(installedAt) => setDraft({ ...draft, installedAt })} />
               <Input label="Note" value={draft.notes} onChangeText={(notes) => setDraft({ ...draft, notes })} multiline />
               <RecordPicker
                 label={manifest.data?.tenant.terminology.customer ?? "Cliente"}

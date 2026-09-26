@@ -281,11 +281,12 @@ export async function coreRoutes(app: FastifyInstance) {
     ]);
     const settings = (tenant?.settings ?? {}) as { terminology?: Partial<Terminology> };
     const terms = mergeTerminology(recordOf(tenant?.category.terminology), settings.terminology);
-    const branding = (tenant?.branding ?? {}) as { accent?: string };
+    const branding = (tenant?.branding ?? {}) as { accent?: string; logoUrl?: string | null };
     const place = tenant?.locations.length === 1 ? [tenant.locations[0]?.address, tenant.locations[0]?.city].filter(Boolean).join(", ") : "";
     const pdf = await renderWorkOrderPdf(found, {
       shopName: tenant?.name ?? "Bitora",
       shopAddress: place || null,
+      logoUrl: typeof branding.logoUrl === "string" ? branding.logoUrl : null,
       accent: typeof branding.accent === "string" ? branding.accent : DEFAULT_ACCENT,
       documentTitle: documentTitle(terms.workOrder),
       labels: { customer: terms.customer, asset: terms.asset, spareParts: terms.spareParts, technician: "Tecnico" },

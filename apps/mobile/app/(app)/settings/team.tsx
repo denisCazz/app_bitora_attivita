@@ -3,11 +3,12 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { View } from "react-native";
-import { Badge, Button, Card, Input, Screen, Text, useTheme } from "@rapportini/ui";
+import { Badge, Button, Card, Input, Screen, Sheet, Text, useTheme } from "@rapportini/ui";
 import { http } from "../../../src/api/client";
 import { queryClient } from "../../../src/api/query";
 import { monthly, useUpdateSeats } from "../../../src/billing";
 import { Chip } from "../../../src/components/Chip";
+import { EmployeeForm } from "../../../src/components/EmployeeForm";
 import { QueryState } from "../../../src/components/States";
 import { can, useManifest } from "../../../src/session";
 
@@ -48,6 +49,7 @@ interface Team {
   seats: TeamSeat;
   members: TeamMember[];
   invites: TeamInvite[];
+  canManage: boolean;
 }
 
 function message(error: unknown) {
@@ -59,27 +61,18 @@ export default function TeamScreen() {
   const router = useRouter();
   const manifest = useManifest();
   const canBill = can(manifest.data, "settings.manage");
-  const [email, setEmail] = useState("");
-  const [roleId, setRoleId] = useState("");
-  const [token, setToken] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [confirmDrop, setConfirmDrop] = useState(false);
+  const [passwordFor, setPasswordFor] = useState<TeamMember | null>(null);
+  const [newPassword, setNewPassword] = useState("");
   const team = useQuery({ queryKey: ["team"], queryFn: () => http.get<Team>("/team") });
   const roles = useQuery({ queryKey: ["roles"], queryFn: () => http.get<Role[]>("/roles") });
   const seats = useUpdateSeats();
 
   async function refresh() {
-    await queryClient.invalidateQueries({ queryKey: ["team"] });
+    await Promise.all([queryClient.invalidateQueries({ queryKey: ["team"] }), queryClient.invalidateQueries({ queryKey: ["roles"] })]);
   }
 
-  const invite = useMutation({
-    mutationFn: () => http.post<{ token: string }>("/team/invites", { email: email.trim(), roleId }),
-    onSuccess: async (result) => {
-      setToken(result.token);
-      setEmail("");
-      await refresh();
-    },
-  });
   const revoke = useMutation({
     mutationFn: (id: string) => http.del(`/team/invites/${id}`),
     onSuccess: refresh,
@@ -99,13 +92,20 @@ export default function TeamScreen() {
       await refresh();
     },
   });
+  const resetPassword = useMutation({
+    mutationFn: (input: { id: string; password: string }) => http.post(`/team/members/${input.id}/password`, { password: input.password }),
+    onSuccess: () => {
+      setPasswordFor(null);
+      setNewPassword("");
+    },
+  });
 
   const data = team.data;
+  const manage = Boolean(data?.canManage);
   const assignable = (roles.data ?? []).filter((role) => !role.isSystem);
-  const chosenRole = roleId || assignable[0]?.id || "";
   const full = Boolean(data && data.seats.used >= data.seats.capacity);
   const spare = data ? data.seats.extra - Math.max(0, data.seats.used - data.seats.included) : 0;
-  const error = invite.error ?? changeRole.error ?? remove.error ?? reactivate.error ?? revoke.error ?? seats.error;
+  const error = changeRole.error ?? remove.error ?? reactivate.error ?? revoke.error ?? seats.error;
   const summary = !data
     ? ""
     : data.seats.extra
@@ -127,9 +127,15 @@ export default function TeamScreen() {
     setConfirmDrop(true);
   }
 
+  function closePassword() {
+    setPasswordFor(null);
+    setNewPassword("");
+    resetPassword.reset();
+  }
+
   return (
-    <Screen onBack={() => router.back()} backLabel="Impostazioni">
-      <Text variant="display">Persone</Text>
+    <Screen onBack={() => router.back()} backLabel="Indietro">
+      <Text variant="display">Dipendenti</Text>
       <Text muted>Chi entra nell'app di questo negozio. Tre utenti sono inclusi. Dal quarto, 5€ al mese per utente.</Text>
       <QueryState isLoading={team.isLoading} error={team.error} refetch={() => void team.refetch()}>
         {data ? (
@@ -143,10 +149,10 @@ export default function TeamScreen() {
               </View>
               <Ionicons name="people-outline" size={22} color={theme.colors.accent} />
             </View>
-            {canBill && data.seats.extra > 0 && !confirmDrop ? (
+            {canBill && manage && data.seats.extra > 0 && !confirmDrop ? (
               <Button tone="secondary" label={spare > 0 ? "Togli un posto non usato" : "Togli un posto"} loading={seats.isPending} onPress={dropSeat} />
             ) : null}
-            {canBill && full ? <Button label={`Aggiungi un utente · ${monthly(data.seats.priceCents)}`} loading={seats.isPending} onPress={addSeat} /> : null}
+            {canBill && manage && full ? <Button label={`Aggiungi un utente · ${monthly(data.seats.priceCents)}`} loading={seats.isPending} onPress={addSeat} /> : null}
             {confirmDrop && data.seats.extra > 0 ? (
               <View style={{ gap: 8 }}>
                 <Text variant="caption">L'ultimo utente aggiunto resta sospeso e non entra più, finché non ricompri il posto.</Text>
@@ -165,11 +171,20 @@ export default function TeamScreen() {
           </Card>
         ) : null}
 
+        {data && !manage ? (
+          <Text variant="caption" muted>
+            Solo il titolare del negozio aggiunge, modifica o toglie le persone.
+          </Text>
+        ) : null}
+
         {data?.members.map((member) => (
           <Card key={member.id} style={{ gap: 10 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
               <View style={{ flex: 1, gap: 2 }}>
-                <Text variant="heading">{member.name}</Text>
+                <Text variant="heading">
+                  {member.name}
+                  {member.self ? " (tu)" : ""}
+                </Text>
                 <Text variant="caption" muted>
                   {member.email}
                 </Text>
@@ -178,9 +193,9 @@ export default function TeamScreen() {
             </View>
             {member.owner ? (
               <Text variant="caption" muted>
-                Gestisce il negozio e gli utenti collegati.
+                Ha creato il negozio: gestisce le persone collegate.
               </Text>
-            ) : (
+            ) : manage ? (
               <View style={{ gap: 10 }}>
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                   {assignable.map((role) => (
@@ -197,6 +212,7 @@ export default function TeamScreen() {
                 {member.status === "SUSPENDED" ? (
                   <Button label="Riattiva" tone="secondary" loading={reactivate.isPending} onPress={() => reactivate.mutate(member.id)} />
                 ) : null}
+                {member.self ? null : <Button tone="soft" label="Imposta una nuova password" onPress={() => setPasswordFor(member)} />}
                 {member.self ? null : confirmId === member.id ? (
                   <View style={{ gap: 8 }}>
                     <Button tone="danger" label="Conferma rimozione" loading={remove.isPending} onPress={() => remove.mutate(member.id)} />
@@ -206,7 +222,7 @@ export default function TeamScreen() {
                   <Button tone="ghost" label="Rimuovi" onPress={() => setConfirmId(member.id)} />
                 )}
               </View>
-            )}
+            ) : null}
           </Card>
         ))}
 
@@ -215,27 +231,48 @@ export default function TeamScreen() {
           <Card key={inviteRow.id} style={{ gap: 8 }}>
             <Text variant="heading">{inviteRow.email}</Text>
             <Text variant="caption" muted>
-              {inviteRow.roleName} · codice {inviteRow.token}
+              {inviteRow.roleName} · occupa un posto finché non lo annulli
             </Text>
-            <Button tone="ghost" label="Annulla invito" loading={revoke.isPending} onPress={() => revoke.mutate(inviteRow.id)} />
+            {manage ? <Button tone="ghost" label="Annulla invito" loading={revoke.isPending} onPress={() => revoke.mutate(inviteRow.id)} /> : null}
           </Card>
         ))}
 
-        {full ? null : (
+        {manage && !full ? (
           <View style={{ gap: 10 }}>
-            <Text variant="title">Invita</Text>
-            <Input label="Email" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-              {assignable.map((role) => (
-                <Chip key={role.id} label={role.name} active={chosenRole === role.id} onPress={() => setRoleId(role.id)} />
-              ))}
-            </View>
-            {token ? <Text>Codice invito: {token}</Text> : null}
-            <Button label="Invia invito" disabled={!email.trim() || !chosenRole} loading={invite.isPending} onPress={() => invite.mutate()} />
+            <Text variant="title">Aggiungi una persona</Text>
+            <Text variant="caption" muted>
+              Crei tu l'account: scegli email e password iniziale e gliele passi. Entra subito nel tuo negozio.
+            </Text>
+            <EmployeeForm roles={assignable} onCreated={refresh} />
           </View>
-        )}
+        ) : null}
+        {manage && full ? (
+          <Text variant="caption" muted>
+            Hai usato tutti i posti. Aggiungi un utente qui sopra per collegare un'altra persona.
+          </Text>
+        ) : null}
         {error ? <Text style={{ color: theme.colors.danger }}>{message(error)}</Text> : null}
       </QueryState>
+
+      <Sheet visible={Boolean(passwordFor)} title="Nuova password" onClose={closePassword}>
+        <Text muted>Per {passwordFor?.name}. Le sessioni aperte sui suoi dispositivi vengono chiuse.</Text>
+        <Input
+          label="Nuova password"
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="Almeno 8 caratteri"
+          value={newPassword}
+          onChangeText={setNewPassword}
+          error={resetPassword.error ? message(resetPassword.error) : undefined}
+        />
+        <Button
+          label="Salva password"
+          disabled={newPassword.length < 8}
+          loading={resetPassword.isPending}
+          onPress={() => passwordFor && resetPassword.mutate({ id: passwordFor.id, password: newPassword })}
+        />
+        <Button tone="ghost" label="Annulla" onPress={closePassword} />
+      </Sheet>
     </Screen>
   );
 }

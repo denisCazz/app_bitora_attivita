@@ -7,7 +7,7 @@ import { downloadMyData, setAiConsent, signOut, useAccount } from "../../src/acc
 import { api } from "../../src/api/client";
 import { queryClient } from "../../src/api/query";
 import { biometricLabel, setBiometricEnabled, useBiometricLock } from "../../src/auth/biometric";
-import { useAuth } from "../../src/auth/store";
+import { forgetRememberedUser, useAuth } from "../../src/auth/store";
 import { QueryState } from "../../src/components/States";
 import { t } from "../../src/i18n";
 import { openLegal } from "../../src/legal";
@@ -160,6 +160,7 @@ export default function ProfileScreen() {
     setDeleteError(null);
     try {
       await api("DELETE", "/me", { password: me?.hasPassword ? deletePassword : undefined }, { force: true });
+      await forgetRememberedUser();
       await signOut({ revoke: false });
       router.replace("/(auth)/login");
       Alert.alert("Account eliminato", "Il tuo account e i relativi dati sono stati cancellati.");

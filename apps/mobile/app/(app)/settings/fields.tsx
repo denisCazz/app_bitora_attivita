@@ -35,7 +35,7 @@ interface FieldRow {
 const TYPE_COPY: Record<FieldType, { label: string; hint: string }> = {
   TEXT: { label: "Testo", hint: "Una riga libera: un codice, una nota, un riferimento." },
   NUMBER: { label: "Numero", hint: "Solo cifre: una potenza, una quantità, un importo." },
-  DATE: { label: "Data", hint: "Un giorno, scritto come 2026-09-25." },
+  DATE: { label: "Data", hint: "Un giorno, scelto dal calendario." },
   SELECT: { label: "Scelta", hint: "Chi compila ne sceglie una da un elenco." },
   PHOTO: { label: "Foto", hint: "Il link di un'immagine già caricata." },
 };

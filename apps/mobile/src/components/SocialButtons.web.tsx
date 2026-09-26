@@ -3,7 +3,7 @@ export type SignInSession = {
   refreshToken: string;
   needsOnboarding: boolean;
   activeTenantId: string | null;
-  user: { platformAdmin: boolean };
+  user: { name: string; email: string; platformAdmin: boolean };
 };
 
 export function SocialButtons(_props: {

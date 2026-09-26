@@ -8,6 +8,7 @@ import { Badge, Button, Card, Input, Screen, Sheet, Text, useTheme } from "@rapp
 import { http } from "../../../src/api/client";
 import { queryClient } from "../../../src/api/query";
 import { Chip } from "../../../src/components/Chip";
+import { DateField } from "../../../src/components/DateField";
 import { SupplierFields } from "../../../src/components/SupplierFields";
 import { QueryState } from "../../../src/components/States";
 import { euro, STATUS_LABEL, when } from "../../../src/format";
@@ -500,7 +501,7 @@ export default function SupplierScreen() {
           </View>
         ))}
         {lines.length < 20 ? <Button label="Aggiungi riga" tone="secondary" onPress={() => setLines((current) => [...current, emptyLine()])} /> : null}
-        <Input label="Consegna prevista" value={expected} onChangeText={setExpected} placeholder="AAAA-MM-GG" autoCapitalize="none" />
+        <DateField label="Consegna prevista" value={expected} onChange={setExpected} minimumDate={new Date()} />
         <Input label="Note" value={notes} onChangeText={setNotes} multiline />
         {order.error ? <Text style={{ color: theme.colors.danger }}>{order.error.message}</Text> : null}
         <Button label="Crea ordine" loading={order.isPending} onPress={() => order.mutate()} />
