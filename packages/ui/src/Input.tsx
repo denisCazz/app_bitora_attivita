@@ -26,6 +26,7 @@ export function Input({ label, error, onFocus, onBlur, multiline, ...props }: Te
         style={{
           minHeight: multiline ? 120 : 54,
           borderRadius: theme.radius.md,
+          borderCurve: "continuous",
           borderWidth: focused ? 1.5 : 1,
           borderColor: error ? theme.colors.danger : focused ? theme.colors.accent : theme.colors.glassBorder,
           backgroundColor: theme.colors.field,

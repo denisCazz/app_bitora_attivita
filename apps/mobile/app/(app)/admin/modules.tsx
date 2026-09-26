@@ -13,6 +13,8 @@ function ModuleEditor({ module }: { module: ModuleDefRow }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState(module.label);
   const [pitch, setPitch] = useState(module.pitch);
+  const [details, setDetails] = useState(module.details);
+  const [features, setFeatures] = useState(module.features.join("\n"));
   const [price, setPrice] = useState(euros(module.priceCents));
   const [trial, setTrial] = useState(String(module.trialDays));
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +53,8 @@ function ModuleEditor({ module }: { module: ModuleDefRow }) {
         <View style={{ gap: 12 }}>
           <Input label="Nome" value={label} onChangeText={setLabel} />
           <Input label="Frase nello Store" value={pitch} onChangeText={setPitch} multiline />
+          <Input label="Cosa fa (pagina del modulo)" value={details} onChangeText={setDetails} multiline />
+          <Input label="Cosa include (una voce per riga)" value={features} onChangeText={setFeatures} multiline />
           <View style={{ flexDirection: "row", gap: 12 }}>
             <View style={{ flex: 1 }}>
               <Input label="Prezzo €/mese" value={price} onChangeText={setPrice} keyboardType="decimal-pad" />
@@ -63,7 +67,16 @@ function ModuleEditor({ module }: { module: ModuleDefRow }) {
           <Button
             label="Salva"
             loading={save.isPending}
-            onPress={() => void submit({ label: label.trim(), pitch: pitch.trim(), priceCents: cents(price), trialDays: Math.min(90, Number.parseInt(trial, 10) || 0) })}
+            onPress={() =>
+              void submit({
+                label: label.trim(),
+                pitch: pitch.trim(),
+                details: details.trim(),
+                features: features.split("\n").map((line) => line.trim()).filter(Boolean),
+                priceCents: cents(price),
+                trialDays: Math.min(90, Number.parseInt(trial, 10) || 0),
+              })
+            }
           />
         </View>
       ) : (

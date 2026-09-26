@@ -132,7 +132,7 @@ export default function CalendarScreen() {
   }
 
   return (
-    <Screen>
+    <Screen onRefresh={() => query.refetch()}>
       <Text variant="display">Calendario</Text>
       <QueryState isLoading={query.isLoading} error={query.error} refetch={() => query.refetch()}>
         {query.data?.length ? (

@@ -1,4 +1,4 @@
-import { isUsable, type Manifest, type ModuleKey, type Vocab, type VocabItem } from "@rapportini/shared";
+import { DEFAULT_LEDGER, hasPermission, isModuleKey, isUsable, MODULE_CODE, type Manifest, type ModuleKey, type Vocab, type VocabItem } from "@rapportini/shared";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useSyncExternalStore } from "react";
 import { ApiError, http } from "./api/client";
@@ -81,10 +81,18 @@ export function useCanUse(key: ModuleKey) {
   return manifest.data?.modules.some((module) => module.key === key && isUsable(module.status)) ?? false;
 }
 
-const EMPTY_VOCAB: Vocab = { scheduleKinds: [], stations: [], dashboard: [] };
+const EMPTY_VOCAB: Vocab = { scheduleKinds: [], stations: [], dashboard: [], ledger: DEFAULT_LEDGER };
 
 export function useVocab(): Vocab {
-  return useManifest().data?.tenant.vocab ?? EMPTY_VOCAB;
+  const vocab = useManifest().data?.tenant?.vocab;
+  return vocab
+    ? {
+        scheduleKinds: vocab.scheduleKinds ?? [],
+        stations: vocab.stations ?? [],
+        dashboard: vocab.dashboard ?? [],
+        ledger: vocab.ledger ?? DEFAULT_LEDGER,
+      }
+    : EMPTY_VOCAB;
 }
 
 export function vocabLabel(items: readonly VocabItem[], key: string) {
@@ -93,4 +101,9 @@ export function vocabLabel(items: readonly VocabItem[], key: string) {
 
 export function can(manifest: Manifest | undefined, permission: string) {
   return manifest?.role.permissions.includes(permission) ?? false;
+}
+
+export function modulePermitted(manifest: Manifest | undefined, key: string) {
+  if (!manifest || !isModuleKey(key)) return false;
+  return hasPermission(manifest.role.permissions, MODULE_CODE[key].permission);
 }

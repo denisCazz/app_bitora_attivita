@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { HttpError, parseBody } from "../errors";
 import { runAssistant, type AssistantResult } from "../lib/assistant/agent";
+import { requireAiConsent } from "../lib/assistant/consent";
 import { transcribe } from "../lib/assistant/openai";
 import { prepareSpeech, speechAudio } from "../lib/assistant/speech";
 import { manifestFor } from "../lib/manifest";
@@ -61,7 +62,7 @@ async function sendAudio(request: FastifyRequest, reply: FastifyReply, id: strin
 }
 
 export async function assistantRoutes(app: FastifyInstance) {
-  app.post("/assistant/chat", { preHandler: app.requireTenant }, async (request) => {
+  app.post("/assistant/chat", { preHandler: [app.requireTenant, requireAiConsent] }, async (request) => {
     const body = parseBody(chatSchema, request.body);
     const manifest = await manifestFor(request.auth!.userId, tenantId(request));
     const result = await runAssistant(app, request, manifest, { ...body, messages: body.messages ?? [] });
@@ -69,17 +70,17 @@ export async function assistantRoutes(app: FastifyInstance) {
     return { ...result, speech };
   });
 
-  app.get("/assistant/speech/:id", { preHandler: app.requireTenant }, async (request, reply) => {
+  app.get("/assistant/speech/:id", { preHandler: [app.requireTenant, requireAiConsent] }, async (request, reply) => {
     return sendAudio(request, reply, (request.params as { id: string }).id);
   });
 
-  app.get("/assistant/speech", { preHandler: app.requireTenant }, async (request, reply) => {
+  app.get("/assistant/speech", { preHandler: [app.requireTenant, requireAiConsent] }, async (request, reply) => {
     const id = prepareSpeech(ownerOf(request), String((request.query as { text?: string }).text ?? ""));
     if (!id) throw new HttpError(400, "Testo mancante");
     return sendAudio(request, reply, id);
   });
 
-  app.post("/assistant/transcribe", { preHandler: app.requireTenant }, async (request) => {
+  app.post("/assistant/transcribe", { preHandler: [app.requireTenant, requireAiConsent] }, async (request) => {
     const file = await request.file();
     if (!file) throw new HttpError(400, "Audio mancante");
     const text = await transcribe(await file.toBuffer(), file.filename || "voce.m4a", file.mimetype || "audio/m4a");

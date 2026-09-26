@@ -1,16 +1,17 @@
-import { Camera } from "expo-camera";
 import { Tabs, useRouter } from "expo-router";
-import * as ImagePicker from "expo-image-picker";
 import * as Notifications from "expo-notifications";
 import { useEffect, useState } from "react";
 import { Platform, View } from "react-native";
 import Animated, { FadeInUp, FadeOutUp } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Text, useTheme } from "@rapportini/ui";
+import { Ionicons } from "@expo/vector-icons";
+import { Glass, Text, useTheme } from "@rapportini/ui";
 import { http } from "../../src/api/client";
 import { TabBar } from "../../src/components/TabBar";
+import { TermsGate } from "../../src/components/TermsGate";
 import { t } from "../../src/i18n";
-import { useManifest } from "../../src/session";
+import { can, useManifest } from "../../src/session";
+import { useStoreSync } from "../../src/billing";
 import NetInfo from "@react-native-community/netinfo";
 
 export default function AppLayout() {
@@ -19,6 +20,7 @@ export default function AppLayout() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [offline, setOffline] = useState(false);
+  useStoreSync(can(manifest.data, "settings.manage"));
 
   useEffect(() => {
     return NetInfo.addEventListener((state) => setOffline(state.isConnected === false));
@@ -30,10 +32,6 @@ export default function AppLayout() {
         await Notifications.requestPermissionsAsync({
           ios: { allowAlert: true, allowBadge: true, allowSound: true },
         }).catch(() => undefined);
-        await Camera.requestCameraPermissionsAsync().catch(() => undefined);
-        await Camera.requestMicrophonePermissionsAsync().catch(() => undefined);
-        await ImagePicker.requestMediaLibraryPermissionsAsync().catch(() => undefined);
-        await ImagePicker.requestMediaLibraryPermissionsAsync(true).catch(() => undefined);
       }
       if (Platform.OS === "android") {
         await Notifications.setNotificationChannelAsync("alerts", {
@@ -75,13 +73,17 @@ export default function AppLayout() {
         <Animated.View
           entering={FadeInUp}
           exiting={FadeOutUp}
-          style={{ position: "absolute", top: insets.top + 6, alignSelf: "center", backgroundColor: theme.colors.warning, borderRadius: 99, paddingVertical: 6, paddingHorizontal: 14 }}
+          style={{ position: "absolute", top: insets.top + 6, alignSelf: "center" }}
         >
-          <Text variant="caption" style={{ color: "#fff", fontWeight: "700" }}>
-            {t("offline")}
-          </Text>
+          <Glass liquid glassTint={theme.colors.warning} rounded={99} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 7, paddingHorizontal: 14 }}>
+            <Ionicons name="cloud-offline" size={14} color="#fff" />
+            <Text variant="caption" style={{ color: "#fff", fontWeight: "700" }}>
+              {t("offline")}
+            </Text>
+          </Glass>
         </Animated.View>
       ) : null}
+      <TermsGate />
     </View>
   );
 }

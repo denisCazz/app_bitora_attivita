@@ -23,6 +23,30 @@ export function fromLocalInput(value: string) {
   return date.toISOString();
 }
 
+/** "Cucina" → "in cucina", "Banco" → "al banco". Vuoto se il nome non dice dove va. */
+export function towardStation(label: string) {
+  const name = label.trim();
+  const lower = name.toLowerCase();
+  if (!name || lower === "generale" || lower === "main") return "";
+  return /^(banco|bar|bancone)\b/.test(lower) ? `al ${lower}` : `in ${lower}`;
+}
+
+export function stationPhrase(labels: string[], joiner: "o" | "e" = "o") {
+  const parts = [...new Set(labels.map(towardStation).filter(Boolean))];
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0]!;
+  return `${parts.slice(0, -1).join(", ")} ${joiner} ${parts[parts.length - 1]}`;
+}
+
+export function lineStatusLabel(status: string, stationLabel: string) {
+  if (status === "SENT") {
+    const where = towardStation(stationLabel);
+    return where ? `Inviato ${where}` : "Inviato";
+  }
+  if (status === "PENDING") return "Non ancora inviata";
+  return STATUS_LABEL[status] ?? status;
+}
+
 export const STATUS_LABEL: Record<string, string> = {
   DRAFT: "Bozza",
   SCHEDULED: "In programma",
@@ -31,7 +55,8 @@ export const STATUS_LABEL: Record<string, string> = {
   CANCELLED: "Annullato",
   OPEN: "Aperto",
   SENT: "Inviato",
-  PARTIAL: "In sala",
+  RECEIVED: "Ricevuto",
+  PARTIAL: "In parte inviata",
   CLOSED: "Chiuso",
   VOID: "Annullato",
   PENDING: "Da inviare",

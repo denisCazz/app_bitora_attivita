@@ -71,6 +71,8 @@ export async function manifestFor(userId: string, tenantId: string) {
         enabled: module.enabled,
         licensed: module.licensed,
         trialEndsAt: module.trialEndsAt,
+        billingSource: module.billingSource,
+        licenseExpiresAt: module.licenseExpiresAt,
       })),
     customFields: fields.map(toField),
     extraSeats: membership.tenant.extraSeats,

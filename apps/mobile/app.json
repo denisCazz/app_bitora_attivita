@@ -11,8 +11,31 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.bitora.mobile",
+      "usesAppleSignIn": true,
       "config": {
         "usesNonExemptEncryption": false
+      },
+      "privacyManifests": {
+        "NSPrivacyTracking": false,
+        "NSPrivacyTrackingDomains": [],
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": ["0A2A.1", "3B52.1", "C617.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryDiskSpace",
+            "NSPrivacyAccessedAPITypeReasons": ["85F4.1", "E174.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+            "NSPrivacyAccessedAPITypeReasons": ["35F9.1"]
+          }
+        ]
       },
       "infoPlist": {
         "NSCameraUsageDescription": "Serve per fotografare l'intervento e leggere i codici dei ricambi.",
@@ -44,15 +67,16 @@
       "bundler": "metro"
     },
     "plugins": [
+      "expo-video",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#07080B",
+          "backgroundColor": "#000000",
           "image": "./assets/splash-icon.png",
-          "imageWidth": 220,
+          "imageWidth": 280,
           "resizeMode": "contain",
           "dark": {
-            "backgroundColor": "#07080B",
+            "backgroundColor": "#000000",
             "image": "./assets/splash-icon.png"
           }
         }
@@ -61,9 +85,16 @@
       [
         "expo-secure-store",
         {
-          "faceIDPermission": "Serve per proteggere l'accesso al tuo account."
+          "faceIDPermission": "Serve per sbloccare Bitora e proteggere l'accesso al tuo account."
         }
       ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Serve per sbloccare Bitora e proteggere l'accesso al tuo account."
+        }
+      ],
+      "expo-apple-authentication",
       "expo-sharing",
       [
         "expo-camera",
@@ -94,7 +125,21 @@
           "microphonePermission": "Serve per dettare i comandi all'assistente e registrare audio durante l'intervento.",
           "enableBackgroundPlayback": false
         }
-      ]
+      ],
+      [
+        "expo-maps",
+        {
+          "requestLocationPermission": true,
+          "locationPermission": "Serve per mostrarti sulla mappa rispetto agli interventi del giorno."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Serve per mostrarti sulla mappa e trovare gli indirizzi degli interventi."
+        }
+      ],
+      "expo-iap"
     ],
     "extra": {
       "apiUrl": "http://localhost:3001"

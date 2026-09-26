@@ -33,7 +33,7 @@ export default function CustomersScreen() {
   const label = manifest.data?.tenant.terminology.customers ?? "Clienti";
 
   return (
-    <Screen>
+    <Screen onRefresh={() => query.refetch()}>
       <Text variant="display">{label}</Text>
       <QueryState isLoading={query.isLoading} error={query.error} refetch={() => query.refetch()}>
         {query.data?.length ? (

@@ -66,7 +66,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     const rows = await tenantDb(id).tenantModule.findMany();
     return category.modules.map((module) => {
       const row = rows.find((item) => item.moduleKey === module.key);
-      const state = row ? { key: module.key, enabled: row.enabled, licensed: row.licensed, trialEndsAt: row.trialEndsAt } : undefined;
+      const state = row ? { key: module.key, enabled: row.enabled, licensed: row.licensed, trialEndsAt: row.trialEndsAt, licenseExpiresAt: row.licenseExpiresAt } : undefined;
       return {
         moduleKey: module.key,
         enabled: row?.enabled ?? true,
@@ -85,7 +85,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     const definition = (await categoryOfTenant(id)).modules.find((module) => module.key === body.moduleKey);
     if (!definition) throw new HttpError(400, "Modulo non disponibile per questa categoria");
     const row = await tenantDb(id).tenantModule.findUnique({ where: { tenantId_moduleKey: { tenantId: id, moduleKey: body.moduleKey } } });
-    const state = row ? { key: body.moduleKey, enabled: row.enabled, licensed: row.licensed, trialEndsAt: row.trialEndsAt } : undefined;
+    const state = row ? { key: body.moduleKey, enabled: row.enabled, licensed: row.licensed, trialEndsAt: row.trialEndsAt, licenseExpiresAt: row.licenseExpiresAt } : undefined;
     if (body.enabled && moduleStatus(definition.free, state) === "locked") {
       throw new HttpError(402, "Sblocca il modulo dallo Store per attivarlo");
     }

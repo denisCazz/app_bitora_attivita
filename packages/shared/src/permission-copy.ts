@@ -183,11 +183,23 @@ export const PERMISSION_COPY: Record<Permission, PermissionText> = {
     label: "Organizzare i turni",
     description: "Crea, cambia e cancella",
   },
+  "accounting.read": {
+    module: "accounting",
+    section: "Contabilità",
+    label: "Vedere i conti",
+    description: "Entrate, uscite e saldo del mese",
+  },
+  "accounting.write": {
+    module: "accounting",
+    section: "Contabilità",
+    label: "Registrare movimenti",
+    description: "Aggiunge i movimenti e segna gli incassi degli interventi",
+  },
   "settings.manage": {
     module: "settings",
     section: "Impostazioni",
     label: "Impostazioni del negozio",
-    description: "Moduli, campi, checklist, ruoli e aspetto",
+    description: "Moduli, campi, checklist, ruoli, aspetto e metodo di incasso",
   },
   "team.manage": {
     module: "settings",

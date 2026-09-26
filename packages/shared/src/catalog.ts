@@ -1,5 +1,6 @@
 import { isModuleKey, MODULE_CODE, type ModuleKey, type StockLocationKind } from "./modules";
 import type { Permission } from "./permissions";
+import { ledgerCategoriesOf, type LedgerCategories } from "./reports";
 import { DEFAULT_ACCENT, mergeTerminology, type Terminology } from "./verticals";
 
 export interface ModuleDefRow {
@@ -7,6 +8,8 @@ export interface ModuleDefRow {
   label: string;
   description: string;
   pitch: string;
+  details: string;
+  features: string[];
   icon: string;
   priceCents: number;
   trialDays: number;
@@ -71,6 +74,7 @@ export interface Vocab {
   scheduleKinds: VocabItem[];
   stations: VocabItem[];
   dashboard: string[];
+  ledger: LedgerCategories;
 }
 
 export interface PresetField {
@@ -108,8 +112,8 @@ export interface PresetSample {
   schedule?: string | { title: string; kind?: string; intervalMonths?: number; dueInDays?: number };
   tables?: Array<{ name: string; posX: number; posY: number; seats: number }>;
   modifiers?: Array<{ name: string; priceDelta?: number }>;
-  ingredients?: Array<{ name: string; unit: string; sku?: string; stock?: StockAt }>;
-  menu?: Array<{ name: string; category: string; station?: string; price: number; modifiers?: string[]; recipe?: Array<{ ingredient: string; quantity: number }> }>;
+  ingredients?: Array<{ name: string; unit: string; sku?: string; category?: string; min?: number; cost?: number; stock?: StockAt }>;
+  menu?: Array<{ name: string; category: string; station?: string; price: number; modifiers?: string[] }>;
   suppliers?: Array<{ name: string; phone?: string; email?: string; order?: Array<{ ingredient?: string; description: string; quantity: number; unitPrice: number }> }>;
   shift?: { roleLabel?: string; start: string; end: string };
   order?: { table?: string; covers?: number; lines: Array<{ item: string; quantity?: number; status?: "PENDING" | "SENT" | "READY" | "SERVED" }> };
@@ -122,6 +126,7 @@ export interface CategoryPresets {
   scheduleKinds?: VocabItem[];
   stations?: VocabItem[];
   dashboard?: string[];
+  ledger?: Partial<LedgerCategories>;
   sample?: PresetSample;
 }
 
@@ -147,6 +152,8 @@ export interface CatalogModule {
   label: string;
   description: string;
   pitch: string;
+  details: string;
+  features: string[];
   icon: string;
   route: string;
   permission: Permission;
@@ -193,10 +200,14 @@ function mergePresets(chain: CategoryNode[]): CategoryPresets {
   const layers = chain.map((node) => asObject<CategoryPresets>(node.presets));
   let assetTypes: string[] | undefined;
   let dashboard: string[] | undefined;
+  let ledgerIncome: string[] | undefined;
+  let ledgerExpense: string[] | undefined;
   let sample: PresetSample | undefined;
   for (const presets of layers) {
     if (presets.assetTypes?.length) assetTypes = presets.assetTypes;
     if (presets.dashboard?.length) dashboard = presets.dashboard;
+    if (presets.ledger?.income?.length) ledgerIncome = presets.ledger.income;
+    if (presets.ledger?.expense?.length) ledgerExpense = presets.ledger.expense;
     if (presets.sample) sample = { ...sample, ...asObject<PresetSample>(presets.sample) };
   }
   return {
@@ -206,6 +217,7 @@ function mergePresets(chain: CategoryNode[]): CategoryPresets {
     scheduleKinds: mergeByKey(layers.map((presets) => presets.scheduleKinds), (item) => item.key),
     stations: mergeByKey(layers.map((presets) => presets.stations), (item) => item.key),
     dashboard: dashboard ?? [],
+    ledger: { income: ledgerIncome ?? [], expense: ledgerExpense ?? [] },
     sample,
   };
 }
@@ -214,7 +226,7 @@ function vocabOf(presets: CategoryPresets): Vocab {
   const scheduleKinds = [...(presets.scheduleKinds ?? [])];
   if (!scheduleKinds.some((item) => item.key === FALLBACK_SCHEDULE_KIND.key)) scheduleKinds.push(FALLBACK_SCHEDULE_KIND);
   const stations = presets.stations?.length ? presets.stations : [FALLBACK_STATION];
-  return { scheduleKinds, stations, dashboard: presets.dashboard ?? [] };
+  return { scheduleKinds, stations, dashboard: presets.dashboard ?? [], ledger: ledgerCategoriesOf(presets.ledger) };
 }
 
 export function resolveCategory(chain: CategoryNode[], moduleDefs: ModuleDefRow[], needs: NeedRow[] = []): ResolvedCategory {
@@ -241,16 +253,20 @@ export function resolveCategory(chain: CategoryNode[], moduleDefs: ModuleDefRow[
     }
   }
 
+  // A category sells only the modules its branch lists; an unconfigured branch falls back to the whole catalog.
+  const configured = [...merged.values()].some((row) => !row.hidden);
   const modules: CatalogModule[] = [];
   for (const definition of moduleDefs) {
     const key = definition.key;
     const row = merged.get(key);
-    if (!definition.active || !isModuleKey(key) || row?.hidden) continue;
+    if (!definition.active || !isModuleKey(key) || row?.hidden || (configured && !row)) continue;
     modules.push({
       key,
       label: row?.label ?? definition.label,
       description: row?.description ?? definition.description,
       pitch: definition.pitch,
+      details: definition.details ?? "",
+      features: definition.features ?? [],
       icon: definition.icon,
       route: MODULE_CODE[key].route,
       permission: MODULE_CODE[key].permission,

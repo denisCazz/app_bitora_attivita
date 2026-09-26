@@ -27,7 +27,7 @@ export function moduleGuard(key: ModuleKey) {
     }
     const status = moduleStatus(
       definition.free,
-      row ? { key, enabled: row.enabled, licensed: row.licensed, trialEndsAt: row.trialEndsAt } : undefined,
+      row ? { key, enabled: row.enabled, licensed: row.licensed, trialEndsAt: row.trialEndsAt, licenseExpiresAt: row.licenseExpiresAt } : undefined,
     );
     if (status === "locked") reply.code(402).send({ error: "Modulo non incluso nel tuo piano", module: key });
     else if (status === "off") reply.code(404).send({ error: "Modulo non attivo" });

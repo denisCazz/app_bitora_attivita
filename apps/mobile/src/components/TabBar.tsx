@@ -4,9 +4,9 @@ import { useRouter, usePathname } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Glass, Pressy, Text, useTheme } from "@rapportini/ui";
+import { Glass, GlassGroup, Pressy, supportsLiquidGlass, Text, useTheme, withAlpha } from "@rapportini/ui";
 
 function hrefFor(item: NavItem) {
   if (item.route === "/") return "/(app)";
@@ -17,6 +17,8 @@ function isActive(item: NavItem, pathname: string) {
   if (item.route === "/") return pathname === "/" || pathname === "/(app)";
   return pathname.startsWith(item.route);
 }
+
+const BAR_PADDING = 5;
 
 export function TabBar({ items }: { items: NavItem[] }) {
   const theme = useTheme();
@@ -30,76 +32,94 @@ export function TabBar({ items }: { items: NavItem[] }) {
   const x = useSharedValue(0);
 
   useEffect(() => {
-    x.value = withTiming(activeIndex * slot, { duration: 260, easing: Easing.out(Easing.cubic) });
+    x.value = withSpring(activeIndex * slot, { damping: 20, stiffness: 240, mass: 0.8 });
   }, [activeIndex, slot, x]);
 
   const indicator = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
 
   if (items.length === 0 || pathname.startsWith("/assistant")) return null;
 
+  const liquid = supportsLiquidGlass;
+  const floatingShadow = liquid
+    ? null
+    : { shadowColor: "#000", shadowOpacity: theme.dark ? 0.5 : 0.12, shadowRadius: 24, shadowOffset: { width: 0, height: 12 } };
+
   return (
     <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: Math.max(insets.bottom - 6, 12), alignItems: "center" }}>
-      <View pointerEvents="box-none" style={{ width: "92%", maxWidth: 580, flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <Glass
-          intensity={70}
-          rounded={30}
-          style={{
-            flex: 1,
-            shadowColor: "#000",
-            shadowOpacity: theme.dark ? 0.5 : 0.12,
-            shadowRadius: 24,
-            shadowOffset: { width: 0, height: 12 },
-          }}
-        >
-          <View style={{ flexDirection: "row", padding: 6 }} onLayout={(event) => setWidth(event.nativeEvent.layout.width - 12)}>
-            {slot > 0 ? (
-              <Animated.View style={[{ position: "absolute", top: 6, bottom: 6, left: 6, width: slot, borderRadius: 24, overflow: "hidden" }, indicator]}>
-                <LinearGradient colors={[theme.colors.accent, theme.colors.accentAlt]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
-              </Animated.View>
-            ) : null}
-            {items.map((item, index) => {
-              const active = index === activeIndex;
-              const color = active ? theme.colors.accentInk : theme.colors.inkSoft;
-              return (
-                <Pressy
-                  key={item.key}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={item.label}
-                  scaleTo={0.9}
-                  onPress={() => router.navigate(hrefFor(item) as never)}
-                  style={{ flex: 1, alignItems: "center", gap: 2, paddingVertical: 9 }}
+      <GlassGroup spacing={8} pointerEvents="box-none" style={{ width: "92%", maxWidth: 580, flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <View style={[{ flex: 1, borderRadius: 31 }, floatingShadow]}>
+          <Glass liquid interactive intensity={70} rounded={31}>
+            <View style={{ flexDirection: "row", padding: BAR_PADDING }} onLayout={(event) => setWidth(event.nativeEvent.layout.width - BAR_PADDING * 2)}>
+              {slot > 0 ? (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    {
+                      position: "absolute",
+                      top: BAR_PADDING,
+                      bottom: BAR_PADDING,
+                      left: BAR_PADDING,
+                      width: slot,
+                      borderRadius: 26,
+                      borderCurve: "continuous",
+                      overflow: "hidden",
+                      backgroundColor: liquid ? withAlpha(theme.colors.accent, theme.dark ? 0.26 : 0.16) : undefined,
+                    },
+                    indicator,
+                  ]}
                 >
-                  <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={21} color={color} />
-                  <Text variant="caption" numberOfLines={1} style={{ color, fontWeight: "700", fontSize: 11, lineHeight: 14 }}>
-                    {item.label}
-                  </Text>
-                </Pressy>
-              );
-            })}
-          </View>
-        </Glass>
+                  {liquid ? null : (
+                    <LinearGradient colors={[theme.colors.accent, theme.colors.accentAlt]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+                  )}
+                </Animated.View>
+              ) : null}
+              {items.map((item, index) => {
+                const active = index === activeIndex;
+                const color = active ? (liquid ? theme.colors.accent : theme.colors.accentInk) : theme.colors.inkSoft;
+                const icon = active ? item.icon.replace(/-outline$/, "") : item.icon;
+                return (
+                  <Pressy
+                    key={item.key}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={item.label}
+                    scaleTo={0.9}
+                    onPress={() => router.navigate(hrefFor(item) as never)}
+                    style={{ flex: 1, alignItems: "center", gap: 2, paddingVertical: 9 }}
+                  >
+                    <Ionicons name={(icon in Ionicons.glyphMap ? icon : item.icon) as keyof typeof Ionicons.glyphMap} size={22} color={color} />
+                    <Text variant="caption" numberOfLines={1} style={{ color, fontWeight: active ? "700" : "600", fontSize: 11, lineHeight: 14 }}>
+                      {item.label}
+                    </Text>
+                  </Pressy>
+                );
+              })}
+            </View>
+          </Glass>
+        </View>
         <Pressy
           accessibilityRole="button"
           accessibilityLabel="Assistente"
+          haptic="medium"
           scaleTo={0.9}
           onPress={() => router.push("/(app)/assistant" as never)}
-          style={{
-            width: 62,
-            height: 62,
-            borderRadius: 31,
-            shadowColor: theme.colors.accent,
-            shadowOpacity: 0.45,
-            shadowRadius: 18,
-            shadowOffset: { width: 0, height: 10 },
-          }}
+          style={[
+            { width: 62, height: 62, borderRadius: 31 },
+            liquid ? null : { shadowColor: theme.colors.accent, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 10 } },
+          ]}
         >
-          <View style={{ flex: 1, borderRadius: 31, overflow: "hidden", alignItems: "center", justifyContent: "center" }}>
-            <LinearGradient colors={[theme.colors.accent, theme.colors.accentAlt]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
-            <Ionicons name="sparkles" size={26} color={theme.colors.accentInk} />
-          </View>
+          {liquid ? (
+            <Glass liquid interactive glassTint={theme.colors.accent} rounded={31} style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="sparkles" size={26} color={theme.colors.accentInk} />
+            </Glass>
+          ) : (
+            <View style={{ flex: 1, borderRadius: 31, overflow: "hidden", alignItems: "center", justifyContent: "center" }}>
+              <LinearGradient colors={[theme.colors.accent, theme.colors.accentAlt]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+              <Ionicons name="sparkles" size={26} color={theme.colors.accentInk} />
+            </View>
+          )}
         </Pressy>
-      </View>
+      </GlassGroup>
     </View>
   );
 }

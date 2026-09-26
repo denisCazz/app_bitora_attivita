@@ -6,8 +6,7 @@ import { View } from "react-native";
 import { Badge, Button, Card, Input, ListItem, Screen, Sheet, Text, useTheme } from "@rapportini/ui";
 import { childrenOf, useAdminCatalog, useAdminMutation, useAdminUsers, type AdminCategory } from "../../../src/admin";
 import { http } from "../../../src/api/client";
-import { queryClient } from "../../../src/api/query";
-import { useAuth } from "../../../src/auth/store";
+import { signOut } from "../../../src/account";
 import { QueryState } from "../../../src/components/States";
 import { useManifest } from "../../../src/session";
 
@@ -27,7 +26,6 @@ export default function ConsoleScreen() {
   const catalog = useAdminCatalog();
   const users = useAdminUsers();
   const manifest = useManifest();
-  const clear = useAuth((state) => state.clear);
   const [creating, setCreating] = useState<{ parent: AdminCategory | null } | null>(null);
   const [label, setLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -71,8 +69,7 @@ export default function ConsoleScreen() {
       router.back();
       return;
     }
-    await clear();
-    queryClient.clear();
+    await signOut();
     router.replace("/(auth)/login");
   }
 

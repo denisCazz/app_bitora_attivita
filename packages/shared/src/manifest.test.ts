@@ -3,6 +3,7 @@ import { categoryChain, planModules, resolveCategory, scoreModules, type Categor
 import { buildManifest, buildNavigation, moduleStatus } from "./manifest";
 import { MODULE_KEYS } from "./modules";
 import { PERMISSIONS } from "./permissions";
+import { demoTestModule } from "./store";
 
 const now = new Date("2026-09-25T12:00:00Z");
 
@@ -11,6 +12,8 @@ const defs: ModuleDefRow[] = MODULE_KEYS.map((key, index) => ({
   label: key,
   description: "",
   pitch: "",
+  details: "",
+  features: [],
   icon: "grid-outline",
   priceCents: key === "dashboard" || key === "settings" ? 0 : 900,
   trialDays: 14,
@@ -64,6 +67,7 @@ const fieldService = node({
     row("work_orders", { free: true, tab: true, sortOrder: 1 }),
     row("assets", { tab: true, sortOrder: 2 }),
     row("spare_parts", { tab: true, sortOrder: 3 }),
+    row("stock"),
     row("calendar"),
     row("settings", { free: true, sortOrder: 99 }),
   ],
@@ -84,25 +88,40 @@ const stoves = node({
   modules: [row("assets", { label: "Stufe" }), row("calendar", { included: false }), row("shifts", { recommended: false })],
 });
 
+const hospitality = node({
+  id: "ho",
+  key: "hospitality",
+  modules: [row("dashboard", { free: true }), row("floor"), row("orders"), row("menu"), row("shifts", { recommended: false })],
+});
+
 const needs: NeedRow[] = [
   { id: "n1", key: "parts", categoryId: "fs", label: "Ricambi", description: "", icon: "cog", modules: ["spare_parts", "stock"], sortOrder: 0, active: true },
-  { id: "n2", key: "tables", categoryId: "other", label: "Tavoli", description: "", icon: "cog", modules: ["floor"], sortOrder: 0, active: true },
-  { id: "n3", key: "service", categoryId: null, label: "Servizio", description: "", icon: "cog", modules: ["floor"], sortOrder: 1, active: true },
+  { id: "n2", key: "tables", categoryId: "ho", label: "Tavoli", description: "", icon: "cog", modules: ["floor"], sortOrder: 0, active: true },
+  { id: "n3", key: "team", categoryId: null, label: "Squadra", description: "", icon: "cog", modules: ["shifts"], sortOrder: 1, active: true },
+  { id: "n4", key: "service", categoryId: null, label: "Servizio", description: "", icon: "cog", modules: ["floor"], sortOrder: 2, active: true },
 ];
 
 describe("resolveCategory", () => {
   const resolved = resolveCategory(categoryChain([fieldService, stoves], "st"), defs, needs);
 
-  it("offers every module, recommends the category ones and hides excluded ones", () => {
+  it("offers only the modules of its branch and hides excluded ones", () => {
     const keys = resolved.modules.map((module) => module.key);
-    expect(keys.slice(0, 4)).toEqual(["dashboard", "work_orders", "assets", "spare_parts"]);
-    expect(keys).toContain("floor");
-    expect(keys).not.toContain("calendar");
+    expect(keys).toEqual(["dashboard", "work_orders", "assets", "spare_parts", "stock", "shifts", "settings"]);
     expect(resolved.modules.find((module) => module.key === "assets")?.label).toBe("Stufe");
     expect(resolved.modules.find((module) => module.key === "assets")?.tab).toBe(true);
     expect(resolved.modules.find((module) => module.key === "spare_parts")?.recommended).toBe(true);
-    expect(resolved.modules.find((module) => module.key === "floor")?.recommended).toBe(false);
     expect(resolved.modules.find((module) => module.key === "shifts")?.recommended).toBe(false);
+  });
+
+  it("keeps foreign modules out of other categories", () => {
+    const keys = resolveCategory([hospitality], defs).modules.map((module) => module.key);
+    expect(keys).toEqual(["dashboard", "floor", "orders", "menu", "shifts"]);
+  });
+
+  it("falls back to the whole catalog while a branch lists no module", () => {
+    const blank = resolveCategory([node({ id: "b", key: "blank" })], defs);
+    expect(blank.modules).toHaveLength(defs.length);
+    expect(blank.modules.every((module) => !module.recommended)).toBe(true);
   });
 
   it("merges terminology, presets, vocab, accent and roles along the tree", () => {
@@ -117,8 +136,20 @@ describe("resolveCategory", () => {
     expect(resolved.path.map((item) => item.key)).toEqual(["field_service", "stoves"]);
   });
 
-  it("keeps needs of the branch and global ones, category first", () => {
-    expect(resolved.needs.map((need) => need.key)).toEqual(["parts", "service"]);
+  it("keeps needs of the branch and global ones, category first, dropping those without modules here", () => {
+    expect(resolved.needs.map((need) => need.key)).toEqual(["parts", "team"]);
+  });
+
+  it("lets a child activity replace only the ledger side it sets", () => {
+    const parent = node({
+      id: "p",
+      key: "field_service",
+      presets: { ledger: { income: ["Interventi"], expense: ["Materiali"] } },
+    });
+    const child = node({ id: "c", key: "mechanic", parentId: "p", presets: { ledger: { income: ["Manodopera"] } } });
+    const mechanic = resolveCategory(categoryChain([parent, child], "c"), defs);
+    expect(mechanic.vocab.ledger).toEqual({ income: ["Manodopera"], expense: ["Materiali"] });
+    expect(mechanic.presets.ledger).toEqual({ income: ["Manodopera"], expense: ["Materiali"] });
   });
 
   it("drops modules disabled in the global catalog", () => {
@@ -131,11 +162,11 @@ describe("scoreModules", () => {
   const resolved = resolveCategory(categoryChain([fieldService, stoves], "st"), defs, needs);
 
   it("boosts modules of chosen needs and pulls in what they require", () => {
-    const score = scoreModules(resolved.modules, resolved.needs, ["service"]);
-    expect(score.get("floor")).toBe(3);
-    expect(score.get("orders")).toBe(3);
-    expect(score.get("menu")).toBe(3);
-    expect(score.get("spare_parts")).toBe(1);
+    const bar = resolveCategory([hospitality], defs, needs);
+    const score = scoreModules(bar.modules, bar.needs, ["tables"]);
+    expect(score.get("floor")).toBe(4);
+    expect(score.get("orders")).toBe(4);
+    expect(score.get("menu")).toBe(4);
     expect(score.get("shifts")).toBe(0);
   });
 
@@ -143,7 +174,7 @@ describe("scoreModules", () => {
     const plan = planModules(resolved.modules, resolved.needs, ["parts"]);
     expect(plan.included.map((module) => module.key)).toEqual(["dashboard", "work_orders", "settings"]);
     expect(plan.suggested.map((module) => module.key).slice(0, 2)).toEqual(["spare_parts", "stock"]);
-    expect(plan.others.some((module) => module.key === "floor")).toBe(true);
+    expect(plan.others.map((module) => module.key)).toEqual(["shifts"]);
   });
 });
 
@@ -158,6 +189,25 @@ describe("moduleStatus", () => {
     expect(moduleStatus(false, { ...base, trialEndsAt: "2026-10-01T00:00:00Z" }, now)).toBe("trial");
     expect(moduleStatus(false, { ...base, trialEndsAt: "2026-09-01T00:00:00Z" }, now)).toBe("locked");
     expect(moduleStatus(false, { ...base, licensed: true, trialEndsAt: null }, now)).toBe("active");
+  });
+
+  it("locks store subscriptions once they expire", () => {
+    const base = { key: "assets" as const, enabled: true, licensed: true, trialEndsAt: null, billingSource: "APPLE" as const };
+    expect(moduleStatus(false, { ...base, licenseExpiresAt: "2026-10-01T00:00:00Z" }, now)).toBe("active");
+    expect(moduleStatus(false, { ...base, licenseExpiresAt: "2026-09-01T00:00:00Z" }, now)).toBe("locked");
+  });
+});
+
+describe("demoTestModule", () => {
+  it("picks the cheapest paid module, first by sort order on ties", () => {
+    const modules = [
+      { key: "work_orders" as const, free: true, priceCents: 0, sortOrder: 0 },
+      { key: "assets" as const, free: false, priceCents: 900, sortOrder: 3 },
+      { key: "calendar" as const, free: false, priceCents: 500, sortOrder: 4 },
+      { key: "customers" as const, free: false, priceCents: 500, sortOrder: 2 },
+    ];
+    expect(demoTestModule(modules)?.key).toBe("customers");
+    expect(demoTestModule(modules.slice(0, 1))).toBeNull();
   });
 });
 
@@ -176,7 +226,7 @@ describe("buildManifest", () => {
     expect(manifest.navigation.map((item) => item.key)).toEqual(["dashboard", "work_orders", "more"]);
     expect(manifest.plan).toMatchObject({ paidModules: 0, monthlyCents: 0, seats: { included: 3, extra: 0, priceCents: 500 } });
     expect(manifest.modules.find((module) => module.key === "spare_parts")?.status).toBe("locked");
-    expect(manifest.modules.find((module) => module.key === "stock")?.score).toBe(3);
+    expect(manifest.modules.find((module) => module.key === "stock")?.score).toBe(4);
     expect(manifest.tenant.branding.accent).toBe("#E25B2A");
     expect(manifest.tenant.category.path).toEqual(["field_service", "stoves"]);
   });

@@ -7,7 +7,7 @@ const MAX_STEPS = 12;
 const MAX_WRITES = 12;
 const MAX_HISTORY = 40;
 const MAX_RESULT_CHARS = 12_000;
-const HIDDEN_KEYS = new Set(["tenantId", "createdAt", "updatedAt", "signatureData", "passwordHash"]);
+const HIDDEN_KEYS = new Set(["tenantId", "createdAt", "updatedAt", "signatureData", "technicianSignature", "passwordHash", "appleRefreshToken"]);
 
 export interface PendingAction {
   id: string;
@@ -122,6 +122,7 @@ function systemPrompt(manifest: Manifest, actions: Action[]): string {
     "- Agisci solo con le azioni disponibili: sono le stesse cose che l'utente può fare dall'app, con i suoi permessi. Se una cosa non è tra le azioni, dillo e non inventare.",
     "- Prima di creare qualcosa cerca se esiste già (cliente, impianto, tavolo, voce di menu). Non inventare mai ID: usa quelli restituiti dalle ricerche.",
     "- Voci di comanda: aggiungi solo voci presenti nel menu (menuItemId). Se una voce non c'è o non è disponibile, fermati per quella voce, dillo e proponi le voci simili; non aggiungerla come testo libero a meno che l'utente lo chieda esplicitamente.",
+    "- Le voci inviate partono subito verso il loro reparto (cucina, banco o altro). Per una comanda con più voci usa una sola send_order con tutte le righe in lines.",
     "- Se una richiesta è ambigua (due clienti con lo stesso nome, più piatti simili) chiedi quale. Se mancano dati indispensabili (es. orario dell'intervento) chiedili tutti insieme in un'unica domanda.",
     "- Dati non indispensabili non chiederli: usa valori sensati (es. comanda con 1 coperto) e dillo nel riepilogo.",
     "- Quando hai tutto, chiama direttamente le azioni di modifica: l'app mostra all'utente una scheda di conferma, quindi non chiedere \"confermi?\" a parole.",

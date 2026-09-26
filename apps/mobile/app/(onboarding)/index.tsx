@@ -321,6 +321,9 @@ function OnboardingSteps({
             <>
               <Input label={t("genericDescribe")} placeholder={t("genericPlaceholder")} multiline value={brief} onChangeText={setBrief} />
               <Button label={t("genericAsk")} tone="secondary" loading={reading} disabled={brief.trim().length < 8} onPress={() => void analyze()} />
+              <Text variant="caption" muted>
+                {t("genericAiNotice")}
+              </Text>
               {setup ? (
                 <Card style={{ gap: 6 }}>
                   <Text variant="heading">{setup.activity}</Text>

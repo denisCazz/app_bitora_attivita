@@ -8,16 +8,59 @@ const dateTime = () => z.string().datetime({ offset: true });
 const durationMinutes = () => z.number().int().min(5).max(720).optional().nullable().describe("Durata in minuti");
 export const vocabKeySchema = z.string().trim().regex(/^[A-Z][A-Z0-9_]{1,39}$/, "Solo maiuscole, numeri e _");
 
+const acceptTerms = () => z.literal(true, { errorMap: () => ({ message: "Per continuare accetta Termini e Informativa privacy" }) });
+const approveClauses = () => z.literal(true, { errorMap: () => ({ message: "Per continuare approva le clausole indicate" }) });
+
 export const registerSchema = z.object({
   name: z.string().trim().min(2).max(80),
   email: z.string().trim().email(),
   password: z.string().min(8).max(80),
+  acceptTerms: acceptTerms(),
+  approveClauses: approveClauses(),
 });
+
+export const termsAcceptSchema = z.object({ version: z.string().min(1), acceptTerms: acceptTerms(), approveClauses: approveClauses() });
+
+export const aiConsentSchema = z.object({ granted: z.boolean() });
 
 export const loginSchema = z.object({
   email: z.string().trim().email(),
   password: z.string().min(1),
 });
+
+export const socialLoginSchema = z.object({
+  provider: z.enum(["apple", "google"]),
+  idToken: z.string().min(1),
+  /** Apple only: exchanged for the token that is revoked when the account is deleted. */
+  authorizationCode: z.string().optional(),
+  /** Apple shares the name only on the very first sign-in. */
+  name: z.string().trim().max(80).optional(),
+  acceptTerms: z.boolean().optional(),
+  approveClauses: z.boolean().optional(),
+});
+
+export const profileSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  email: z.string().trim().email(),
+  currentPassword: z.string().optional(),
+});
+
+/** Accounts created with Apple or Google have no password yet, so they set one without `currentPassword`. */
+export const passwordChangeSchema = z.object({
+  currentPassword: z.string().optional(),
+  newPassword: z.string().min(8).max(80),
+});
+
+export const logoutSchema = z.object({
+  refreshToken: z.string().optional(),
+  pushToken: z.string().optional(),
+});
+
+export const deleteAccountSchema = z.object({
+  password: z.string().optional(),
+});
+
+export const deleteAccountByEmailSchema = loginSchema;
 
 export const demoLoginSchema = z.object({
   email: z
@@ -149,6 +192,7 @@ export const workOrderSchema = z.object({
 export const signatureSchema = z.object({
   signedBy: z.string().trim().min(2).max(80),
   signatureData: z.string().min(2),
+  role: z.enum(["CLIENT", "TECHNICIAN"]).default("CLIENT"),
 });
 
 export const checklistTemplateSchema = z.object({
@@ -234,6 +278,32 @@ export const modifierSchema = z.object({
   priceDelta: z.number().default(0),
 });
 
+export const menuSourceSchema = z.object({
+  url: z.string().trim().min(4).max(500),
+});
+
+export const menuImportItemSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  category: z.string().trim().min(2).max(60),
+  price: z.number().min(0).max(100_000),
+  station: z.string().trim().max(40).optional(),
+  available: z.boolean().optional(),
+  modifiers: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(80),
+        priceDelta: z.number().min(-10_000).max(10_000).optional(),
+      }),
+    )
+    .max(20)
+    .optional(),
+});
+
+export const menuApplySchema = menuSourceSchema.extend({
+  hideMissing: z.boolean().optional(),
+  items: z.array(menuImportItemSchema).min(1).max(200),
+});
+
 export const orderLineSchema = z
   .object({
     menuItemId: z.string().optional().nullable(),
@@ -246,6 +316,10 @@ export const orderLineSchema = z
   })
   .refine((value) => Boolean(value.menuItemId) || Boolean(value.name?.trim()), { message: "Scegli dal menu oppure scrivi la voce" });
 
+export const sendOrderSchema = z.object({
+  lines: z.array(orderLineSchema).max(100).default([]),
+});
+
 export const closeOrderSchema = z.object({
   payments: z.array(z.object({ label: z.string().min(1).max(40), amount: z.number().min(0) })).min(1),
 });
@@ -254,32 +328,53 @@ export const ingredientSchema = z.object({
   name: z.string().trim().min(2).max(120),
   unit: z.string().trim().min(1).max(20),
   sku: z.string().trim().max(40).optional().nullable(),
+  category: z.string().trim().max(60).optional().nullable(),
+  barcode: z.string().trim().max(80).optional().nullable(),
+  minQuantity: z.number().min(0).max(1_000_000).optional().nullable(),
+  unitCost: z.number().min(0).max(100_000).optional().nullable(),
+  supplierId: z.string().optional().nullable(),
 });
 
-export const recipeSchema = z.object({
-  menuItemId: z.string(),
-  lines: z.array(z.object({ ingredientId: z.string(), quantity: z.number().positive() })).min(1),
-});
+export const INVENTORY_MOVES = ["IN", "OUT", "WASTE", "COUNT"] as const;
+export type InventoryMove = (typeof INVENTORY_MOVES)[number];
+
+export const inventoryMoveSchema = z
+  .object({
+    kind: z.enum(INVENTORY_MOVES),
+    quantity: z.number().min(0).max(1_000_000),
+    locationId: z.string().optional().nullable(),
+    unitCost: z.number().min(0).max(100_000).optional().nullable(),
+    note: z.string().trim().max(200).optional().nullable(),
+  })
+  .refine((value) => value.kind === "COUNT" || value.quantity > 0, { message: "La quantità deve essere maggiore di zero", path: ["quantity"] });
 
 export const supplierSchema = z.object({
-  name: z.string().trim().min(2).max(120),
+  name: z.string().trim().min(2).max(120).describe("Ragione sociale"),
+  vat: z.string().trim().max(20).optional().nullable().describe("Partita IVA o codice fiscale"),
+  contactName: z.string().trim().max(80).optional().nullable().describe("Referente"),
   email: z.string().trim().email().optional().nullable().or(z.literal("")),
   phone: z.string().trim().max(40).optional().nullable(),
+  address: z.string().trim().max(160).optional().nullable(),
+  city: z.string().trim().max(80).optional().nullable(),
+  paymentTerms: z.string().trim().max(80).optional().nullable().describe("Condizioni di pagamento, es. Bonifico a 30 giorni"),
   notes: z.string().trim().max(1000).optional().nullable(),
 });
 
 export const purchaseOrderSchema = z.object({
   supplierId: z.string(),
+  notes: z.string().trim().max(500).optional().nullable(),
+  expectedAt: dateTime().optional().nullable().describe("Consegna prevista, ISO 8601"),
   lines: z
     .array(
       z.object({
-        ingredientId: z.string().optional().nullable(),
+        ingredientId: z.string().optional().nullable().describe("Ingrediente di magazzino, se la riga deve entrare in giacenza"),
         description: z.string().trim().min(1).max(160),
         quantity: z.number().positive(),
         unitPrice: z.number().min(0),
       }),
     )
-    .min(1),
+    .min(1)
+    .max(40),
 });
 
 export const shiftSchema = z.object({
@@ -288,6 +383,34 @@ export const shiftSchema = z.object({
   startsAt: dateTime(),
   endsAt: dateTime(),
   status: z.enum(["PLANNED", "CONFIRMED", "DONE", "CANCELLED"]).optional(),
+});
+
+export const payRateSchema = z.object({
+  hourlyRate: z.number().min(0).max(1_000).nullable().describe("Paga oraria in euro. null toglie la persona dalla paga"),
+  overtimeRate: z.number().min(0).max(1_000).nullable().describe("Paga oraria straordinaria in euro"),
+  weeklyHours: z.number().min(1).max(80).optional().describe("Ore ordinarie a settimana, da lunedì a domenica. Default 40"),
+  month: z
+    .string()
+    .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
+    .optional()
+    .describe("Mese YYYY-MM da ricalcolare. Default il mese corrente"),
+});
+
+export const LEDGER_KINDS = ["INCOME", "EXPENSE"] as const;
+export type LedgerKind = (typeof LEDGER_KINDS)[number];
+
+export const ledgerEntrySchema = z.object({
+  kind: z.enum(LEDGER_KINDS).describe("INCOME entrata, EXPENSE uscita"),
+  date: dateTime().describe("Data del movimento ISO 8601"),
+  amount: z.number().positive().max(10_000_000).describe("Importo lordo, IVA compresa"),
+  vatRate: z.number().min(0).max(100).optional().describe("Aliquota IVA in percentuale, es. 22"),
+  category: z.string().trim().min(1).max(60).describe("Voce, es. Incassi, Affitto, Carburante"),
+  description: z.string().trim().max(300).optional().nullable(),
+  method: z.string().trim().max(40).optional().nullable().describe("Contanti, Carta, Bonifico..."),
+  paid: z.boolean().optional().describe("false se ancora da incassare o da pagare"),
+  customerId: z.string().optional().nullable(),
+  supplierId: z.string().optional().nullable(),
+  workOrderId: z.string().optional().nullable(),
 });
 
 export const roleSchema = z.object({
@@ -313,6 +436,8 @@ export const acceptInviteSchema = z.object({
   token: z.string().min(10),
   name: z.string().trim().min(2).max(80),
   password: z.string().min(8).max(80),
+  acceptTerms: acceptTerms(),
+  approveClauses: approveClauses(),
 });
 
 export const moduleToggleSchema = z.object({
@@ -323,6 +448,14 @@ export const moduleToggleSchema = z.object({
 export const trialSchema = z.object({ moduleKey: moduleKeySchema });
 
 export const checkoutSchema = z.object({ moduleKeys: z.array(moduleKeySchema).min(1).max(MODULE_KEYS.length) });
+
+export const storePurchaseSchema = z.object({
+  platform: z.enum(["ios", "android"]),
+  productId: z.string().trim().min(1).max(120),
+  purchaseToken: z.string().trim().min(10).max(20_000),
+});
+
+export const storeSyncSchema = z.object({ purchases: z.array(storePurchaseSchema).max(50) });
 
 export const seatsSchema = z.object({
   extraSeats: z.number().int().min(0).max(100),
@@ -363,6 +496,12 @@ export const categoryPresetsSchema = z.object({
   scheduleKinds: z.array(vocabItemSchema).max(20).optional(),
   stations: z.array(vocabItemSchema).max(20).optional(),
   dashboard: z.array(z.string().trim().min(2).max(40)).max(6).optional(),
+  ledger: z
+    .object({
+      income: z.array(z.string().trim().min(2).max(40)).max(12).optional(),
+      expense: z.array(z.string().trim().min(2).max(40)).max(12).optional(),
+    })
+    .optional(),
   sample: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -384,6 +523,8 @@ export const moduleDefSchema = z.object({
   label: z.string().trim().min(2).max(60).optional(),
   description: z.string().trim().max(200).optional(),
   pitch: z.string().trim().max(200).optional(),
+  details: z.string().trim().max(2000).optional(),
+  features: z.array(z.string().trim().min(2).max(120)).max(12).optional(),
   icon: z.string().trim().min(2).max(60).optional(),
   priceCents: z.number().int().min(0).max(100_000).optional(),
   trialDays: z.number().int().min(0).max(90).optional(),

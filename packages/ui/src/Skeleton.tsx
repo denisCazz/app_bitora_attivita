@@ -17,7 +17,7 @@ export function Skeleton({ height = 18, width = "100%" as number | `${number}%` 
   }, [opacity]);
   return (
     <Animated.View style={{ opacity }}>
-      <View style={{ height, width, borderRadius: theme.radius.sm, backgroundColor: theme.colors.glassSolid }} />
+      <View style={{ height, width, borderRadius: theme.radius.sm, borderCurve: "continuous", backgroundColor: theme.colors.glassSolid }} />
     </Animated.View>
   );
 }

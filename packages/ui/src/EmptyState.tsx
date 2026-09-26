@@ -20,6 +20,7 @@ export function EmptyState({
           width: 72,
           height: 72,
           borderRadius: 24,
+          borderCurve: "continuous",
           backgroundColor: theme.colors.accentSoft,
           borderWidth: 1,
           borderColor: theme.colors.glassBorder,

@@ -9,9 +9,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Glass, Input, Pressy, Text, ThemeProvider } from "@rapportini/ui";
 import { http } from "../../src/api/client";
 import { queryClient } from "../../src/api/query";
+import { offerBiometric } from "../../src/auth/biometric";
 import { useAuth } from "../../src/auth/store";
 import { BrandMark, PhotoStage, SlideDots, useSlide } from "../../src/components/PhotoStage";
+import { SocialButtons, type SignInSession } from "../../src/components/SocialButtons";
 import { t } from "../../src/i18n";
+import { openLegal } from "../../src/legal";
 
 const DEMOS = [
   { label: t("demoStove"), email: "marco@stufe.demo", category: "stoves" },
@@ -36,14 +39,6 @@ const DEMOS = [
   { label: t("demoFlorist"), email: "viola@fiori.demo", category: "florist" },
 ];
 
-type Session = {
-  accessToken: string;
-  refreshToken: string;
-  needsOnboarding: boolean;
-  activeTenantId: string | null;
-  user: { platformAdmin: boolean };
-};
-
 export default function LoginScreen() {
   const { index, accent, slide } = useSlide();
   return (
@@ -62,15 +57,16 @@ function LoginForm({ index, accent, slideKey }: { index: number; accent: string;
   const [demoEmail, setDemoEmail] = useState<string | null>(null);
   const form = useForm({ resolver: zodResolver(loginSchema), defaultValues: { email: "", password: "" } });
 
-  async function enter(session: Session) {
+  async function enter(session: SignInSession, { demo = false } = {}) {
     await setSession(session.accessToken, session.refreshToken);
     await queryClient.invalidateQueries({ queryKey: ["manifest"] });
     if (session.user.platformAdmin && !session.activeTenantId) router.replace("/(app)/admin");
     else router.replace(session.needsOnboarding ? "/(onboarding)" : "/");
+    if (!demo) void offerBiometric();
   }
 
   const onSubmit = form.handleSubmit(async (values) => {
-    await enter(await http.post<Session>("/auth/login", values));
+    await enter(await http.post<SignInSession>("/auth/login", values));
   });
 
   function submit() {
@@ -82,8 +78,8 @@ function LoginForm({ index, accent, slideKey }: { index: number; accent: string;
     setDemoEmail(email);
     form.clearErrors("root");
     http
-      .post<Session>("/auth/demo", { email })
-      .then((session) => enter(session))
+      .post<SignInSession>("/auth/demo", { email })
+      .then((session) => enter(session, { demo: true }))
       .catch((error: Error) => form.setError("root", { message: error.message }))
       .finally(() => setDemoEmail(null));
   }
@@ -148,6 +144,11 @@ function LoginForm({ index, accent, slideKey }: { index: number; accent: string;
               />
               {form.formState.errors.root ? <Text style={{ color: "#FF9A8F" }}>{form.formState.errors.root.message}</Text> : null}
               <Button label={t("login")} loading={form.formState.isSubmitting} onPress={submit} />
+              <SocialButtons
+                mode="signin"
+                onSession={enter}
+                onError={(message) => (message ? form.setError("root", { message }) : form.clearErrors("root"))}
+              />
               <View style={{ gap: 8 }}>
                 <Text variant="caption" style={{ color: "rgba(255,255,255,0.6)" }}>
                   {t("tryDemo")}
@@ -178,7 +179,14 @@ function LoginForm({ index, accent, slideKey }: { index: number; accent: string;
               </Text>
             </Text>
             <Text variant="caption" style={{ color: "rgba(255,255,255,0.45)" }}>
-              {t("developedBy")}
+              {t("developedBy")} ·{" "}
+              <Text variant="caption" style={{ color: "rgba(255,255,255,0.7)" }} onPress={() => void openLegal("privacy")}>
+                Privacy
+              </Text>{" "}
+              ·{" "}
+              <Text variant="caption" style={{ color: "rgba(255,255,255,0.7)" }} onPress={() => void openLegal("terms")}>
+                Termini
+              </Text>
             </Text>
           </Animated.View>
         </View>

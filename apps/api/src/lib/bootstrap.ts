@@ -152,7 +152,17 @@ async function createSample(tx: Tx, ids: { tenantId: string; locationId: string;
 
   const ingredients = new Map<string, string>();
   for (const ingredient of sample.ingredients ?? []) {
-    const created = await tx.ingredient.create({ data: { tenantId, name: ingredient.name, unit: ingredient.unit, sku: ingredient.sku ?? null } });
+    const created = await tx.ingredient.create({
+      data: {
+        tenantId,
+        name: ingredient.name,
+        unit: ingredient.unit,
+        sku: ingredient.sku ?? null,
+        category: ingredient.category ?? null,
+        minQuantity: ingredient.min ?? null,
+        unitCost: ingredient.cost ?? null,
+      },
+    });
     ingredients.set(ingredient.name, created.id);
     await stock({ ingredientId: created.id }, ingredient.stock);
   }
@@ -170,13 +180,6 @@ async function createSample(tx: Tx, ids: { tenantId: string; locationId: string;
     menu.set(item.name, { id: created.id, price: item.price, station });
     const modifierIds = (item.modifiers ?? []).map((name) => modifiers.get(name)).filter((id): id is string => Boolean(id));
     if (modifierIds.length) await tx.menuItemModifier.createMany({ data: modifierIds.map((modifierId) => ({ tenantId, menuItemId: created.id, modifierId })) });
-    const lines = (item.recipe ?? []).filter((line) => ingredients.has(line.ingredient));
-    if (lines.length) {
-      const recipe = await tx.recipe.create({ data: { tenantId, menuItemId: created.id } });
-      await tx.recipeLine.createMany({
-        data: lines.map((line) => ({ tenantId, recipeId: recipe.id, ingredientId: ingredients.get(line.ingredient)!, quantity: line.quantity })),
-      });
-    }
   }
 
   for (const supplier of sample.suppliers ?? []) {
@@ -193,6 +196,15 @@ async function createSample(tx: Tx, ids: { tenantId: string; locationId: string;
         unitPrice: line.unitPrice,
       })),
     });
+    for (const line of supplier.order) {
+      const preset = sample.ingredients?.find((ingredient) => ingredient.name === line.ingredient);
+      const ingredientId = line.ingredient ? ingredients.get(line.ingredient) : undefined;
+      if (!preset || !ingredientId) continue;
+      await tx.ingredient.update({
+        where: { id: ingredientId },
+        data: { supplierId: created.id, unitCost: preset.cost ?? line.unitPrice, minQuantity: preset.min ?? line.quantity },
+      });
+    }
   }
 
   const tables = new Map<string, string>();
@@ -241,14 +253,18 @@ async function createSample(tx: Tx, ids: { tenantId: string; locationId: string;
 
   const lines = (sample.order?.lines ?? []).filter((line) => menu.has(line.item));
   if (sample.order && lines.length) {
+    const rows = lines.map((line) => {
+      const item = menu.get(line.item)!;
+      return { tenantId, menuItemId: item.id, name: line.item, station: item.station, quantity: line.quantity ?? 1, unitPrice: item.price, status: line.status ?? "SENT" as const };
+    });
     const order = await tx.order.create({
-      data: { tenantId, tableId: sample.order.table ? (tables.get(sample.order.table) ?? null) : null, covers: sample.order.covers ?? 1, status: "OPEN" },
+      data: {
+        tenantId,
+        tableId: sample.order.table ? (tables.get(sample.order.table) ?? null) : null,
+        covers: sample.order.covers ?? 1,
+        status: rows.some((line) => line.status === "PENDING") ? "PARTIAL" : "SENT",
+      },
     });
-    await tx.orderLine.createMany({
-      data: lines.map((line) => {
-        const item = menu.get(line.item)!;
-        return { tenantId, orderId: order.id, menuItemId: item.id, name: line.item, station: item.station, quantity: line.quantity ?? 1, unitPrice: item.price, status: line.status ?? "PENDING" };
-      }),
-    });
+    await tx.orderLine.createMany({ data: rows.map((row) => ({ ...row, orderId: order.id })) });
   }
 }

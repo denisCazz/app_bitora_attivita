@@ -4,8 +4,9 @@ import { Glass } from "./Glass";
 import { Pressy } from "./Pressy";
 import { Text } from "./Text";
 import { useTheme } from "./theme";
+import { withAlpha } from "./tokens";
 
-type Tone = "primary" | "secondary" | "ghost" | "danger";
+type Tone = "primary" | "secondary" | "soft" | "ghost" | "danger";
 
 export function Button({
   label,
@@ -16,8 +17,8 @@ export function Button({
   ...props
 }: Omit<PressableProps, "style"> & { label: string; tone?: Tone; loading?: boolean; style?: StyleProp<ViewStyle> }) {
   const theme = useTheme();
-  const color = tone === "secondary" || tone === "ghost" ? theme.colors.ink : theme.colors.accentInk;
-  const shape: ViewStyle = { minHeight: 54, borderRadius: theme.radius.md, paddingHorizontal: theme.space.lg, alignItems: "center", justifyContent: "center" };
+  const color = tone === "soft" ? theme.colors.accent : tone === "secondary" || tone === "ghost" ? theme.colors.ink : theme.colors.accentInk;
+  const shape: ViewStyle = { minHeight: 54, borderRadius: theme.radius.md, borderCurve: "continuous", paddingHorizontal: theme.space.lg, alignItems: "center", justifyContent: "center" };
   const content = loading ? <ActivityIndicator color={color} /> : <Text style={{ color, fontWeight: "700", letterSpacing: -0.1 }}>{label}</Text>;
 
   return (
@@ -50,6 +51,8 @@ export function Button({
           <LinearGradient colors={["rgba(255,255,255,0.28)", "rgba(255,255,255,0)"]} end={{ x: 0, y: 0.6 }} style={StyleSheet.absoluteFill} />
           {content}
         </View>
+      ) : tone === "soft" ? (
+        <View style={[shape, { minHeight: 46, backgroundColor: withAlpha(theme.colors.accent, theme.dark ? 0.16 : 0.1) }]}>{content}</View>
       ) : tone === "secondary" ? (
         <Glass rounded={theme.radius.md} style={shape}>
           {content}

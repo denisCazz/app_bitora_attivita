@@ -28,6 +28,8 @@ export const PERMISSIONS = [
   "suppliers.write",
   "shifts.read",
   "shifts.write",
+  "accounting.read",
+  "accounting.write",
   "settings.manage",
   "team.manage",
 ] as const;

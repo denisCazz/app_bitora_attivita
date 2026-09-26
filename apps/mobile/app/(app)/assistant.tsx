@@ -2,14 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Backdrop, Button, Card, Glass, Pressy, Text, useTheme } from "@rapportini/ui";
+import { useAiConsent } from "../../src/account";
 import { transcribeRecording, turnSpeech, useAssistant, type Entry } from "../../src/assistant";
+import { AiConsent } from "../../src/components/AiConsent";
 import { LiveTalk } from "../../src/components/LiveTalk";
+import { goBack } from "../../src/navigation";
 import { useCanUse, useManifest } from "../../src/session";
 import { beginRecording, RECORDING_OPTIONS, useSpeaker } from "../../src/voice";
 
@@ -41,9 +43,15 @@ function Bubble({ entry }: { entry: Entry }) {
 }
 
 export default function AssistantScreen() {
+  const consent = useAiConsent();
+  if (consent.loading) return null;
+  if (!consent.granted) return <AiConsent onBack={() => goBack()} />;
+  return <AssistantChat />;
+}
+
+function AssistantChat() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const scroll = useRef<ScrollView>(null);
   const manifest = useManifest().data;
   const owner = manifest ? `${manifest.user.id}:${manifest.tenant.id}` : null;
@@ -127,13 +135,15 @@ export default function AssistantScreen() {
     <View style={{ flex: 1, backgroundColor: theme.colors.paper }}>
       <Backdrop />
       <View style={{ paddingTop: insets.top + theme.space.sm, paddingHorizontal: theme.space.lg, paddingBottom: theme.space.sm, flexDirection: "row", alignItems: "center", gap: 12 }}>
-        <Pressy onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Indietro" hitSlop={10}>
-          <Ionicons name="chevron-back" size={26} color={theme.colors.accent} />
+        <Pressy onPress={() => goBack()} accessibilityRole="button" accessibilityLabel="Indietro" hitSlop={10} scaleTo={0.9} style={{ borderRadius: 22 }}>
+          <Glass liquid interactive rounded={22} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="chevron-back" size={24} color={theme.colors.ink} />
+          </Glass>
         </Pressy>
         <View style={{ flex: 1 }}>
           <Text variant="title">Assistente</Text>
           <Text variant="caption" muted>
-            Dimmi cosa fare, chiedo conferma prima di modificare.
+            Risposte generate dall'IA, possono contenere errori. Chiedo conferma prima di modificare.
           </Text>
         </View>
         {entries.length ? (

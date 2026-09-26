@@ -1,11 +1,13 @@
 import { hashPassword } from "../src/lib/auth";
 import { createTenantForUser } from "../src/lib/bootstrap";
+import { prepareDemoTenant } from "../src/lib/demo";
 import { prisma } from "../src/lib/prisma";
 
 async function ensureDemo(input: { email: string; name: string; shop: string; category: string; city: string }) {
   const existing = await prisma.user.findUnique({ where: { email: input.email } });
   if (existing) {
     if (existing.platformAdmin) await prisma.user.update({ where: { id: existing.id }, data: { platformAdmin: false } });
+    if (existing.activeTenantId) await prepareDemoTenant(existing.activeTenantId);
     console.log(`Già presente ${input.email}`);
     return;
   }
@@ -14,7 +16,8 @@ async function ensureDemo(input: { email: string; name: string; shop: string; ca
   const user = await prisma.user.create({
     data: { email: input.email, name: input.name, passwordHash: await hashPassword("demo1234"), platformAdmin: false },
   });
-  await createTenantForUser(user.id, { name: input.shop, categoryId: category.id, city: input.city, withSample: true });
+  const tenant = await createTenantForUser(user.id, { name: input.shop, categoryId: category.id, city: input.city, withSample: true });
+  await prepareDemoTenant(tenant.id);
   console.log(`Creato ${input.email} / demo1234 · ${input.shop}`);
 }
 

@@ -10,6 +10,7 @@
   },
   "peerDependencies": {
     "expo-blur": "*",
+    "expo-glass-effect": "*",
     "expo-haptics": "*",
     "expo-linear-gradient": "*",
     "react": "*",

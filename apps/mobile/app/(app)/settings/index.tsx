@@ -17,8 +17,9 @@ export default function SettingsScreen() {
         <ListItem title="Campi personalizzati" subtitle="Domande in più sulle schede" onPress={() => router.push("/(app)/settings/fields")} />
         <ListItem title="Checklist" subtitle="Modelli di controllo" onPress={() => router.push("/(app)/settings/checklists")} />
         <ListItem title="Moduli" subtitle="Accendi o spegni le sezioni" onPress={() => router.push("/(app)/settings/modules")} />
-        <ListItem title="Piano e Store" subtitle="Sblocca moduli, prova gratis 14 giorni" onPress={() => router.push("/(app)/store")} />
+        <ListItem title="Piano e Store" subtitle="Scopri e sblocca i moduli" onPress={() => router.push("/(app)/store")} />
         <ListItem title="Aspetto e parole" subtitle="Colore e terminologia" onPress={() => router.push("/(app)/settings/branding")} />
+        <ListItem title="Incassi" subtitle="Stripe, Revolut o Satispay" onPress={() => router.push("/(app)/settings/payments")} />
       </Card>
       <Text variant="caption" muted>
         {t("developedBy")}

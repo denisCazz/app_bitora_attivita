@@ -35,7 +35,7 @@ export function ListItem({
       }}
     >
       {leading ? (
-        <View style={{ width: 40, height: 40, borderRadius: 14, backgroundColor: theme.colors.accentSoft, alignItems: "center", justifyContent: "center" }}>
+        <View style={{ width: 40, height: 40, borderRadius: 12, borderCurve: "continuous", backgroundColor: theme.colors.accentSoft, alignItems: "center", justifyContent: "center" }}>
           {leading}
         </View>
       ) : null}

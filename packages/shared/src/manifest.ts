@@ -3,6 +3,7 @@ import { scoreModules, type CatalogModule, type CategoryPresets, type NeedView, 
 import type { ModuleKey } from "./modules";
 import { hasPermission, type Permission } from "./permissions";
 import { EXTRA_SEAT_CENTS, INCLUDED_SEATS, seatMonthlyCents } from "./seats";
+import { storeProductId, type BillingSource } from "./store";
 import { mergeTerminology, type Terminology } from "./verticals";
 
 export interface Branding {
@@ -69,7 +70,12 @@ export interface ManifestModule {
   priceCents: number;
   trialDays: number;
   pitch: string;
+  details: string;
+  features: string[];
   trialEndsAt: string | null;
+  billingSource: BillingSource | null;
+  licenseExpiresAt: string | null;
+  storeProductId: string;
   label: string;
   description: string;
   icon: string;
@@ -81,15 +87,23 @@ export interface ModuleState {
   enabled: boolean;
   licensed: boolean;
   trialEndsAt: Date | string | null;
+  billingSource?: BillingSource | null;
+  licenseExpiresAt?: Date | string | null;
+}
+
+export function hasLicense(state: ModuleState | undefined, now = new Date()): boolean {
+  if (!state?.licensed) return false;
+  return !state.licenseExpiresAt || new Date(state.licenseExpiresAt) > now;
 }
 
 export function moduleStatus(free: boolean, state: ModuleState | undefined, now = new Date()): ModuleStatus {
   const trialEnds = state?.trialEndsAt ? new Date(state.trialEndsAt) : null;
   const inTrial = Boolean(trialEnds && trialEnds > now);
-  const unlocked = free || Boolean(state?.licensed) || inTrial;
+  const licensed = hasLicense(state, now);
+  const unlocked = free || licensed || inTrial;
   if (!unlocked) return "locked";
   if (state && !state.enabled) return "off";
-  if (!free && !state?.licensed && inTrial) return "trial";
+  if (!free && !licensed && inTrial) return "trial";
   return "active";
 }
 
@@ -148,7 +162,12 @@ export function buildManifest(input: {
       priceCents: definition.priceCents,
       trialDays: definition.trialDays,
       pitch: definition.pitch,
+      details: definition.details,
+      features: definition.features,
       trialEndsAt: state?.trialEndsAt ? new Date(state.trialEndsAt).toISOString() : null,
+      billingSource: state?.licensed ? (state.billingSource ?? null) : null,
+      licenseExpiresAt: state?.licensed && state.licenseExpiresAt ? new Date(state.licenseExpiresAt).toISOString() : null,
+      storeProductId: storeProductId(definition.key),
       label: definition.label,
       description: definition.description,
       icon: definition.icon,
@@ -156,7 +175,10 @@ export function buildManifest(input: {
     };
   });
   const usable = category.modules.filter((definition) => isUsable(modules.find((module) => module.key === definition.key)!.status));
-  const paid = modules.filter((module) => !module.free && input.moduleStates.find((row) => row.key === module.key)?.licensed);
+  const paid = modules.filter((module) => {
+    const state = input.moduleStates.find((row) => row.key === module.key);
+    return !module.free && hasLicense(state, input.now) && state?.billingSource !== "DEMO";
+  });
   const extraSeats = Math.max(0, input.extraSeats ?? 0);
   const generic = category.key === GENERIC_CATEGORY_KEY;
   const navigation = buildNavigation(usable, input.role.permissions).map((item) => ({

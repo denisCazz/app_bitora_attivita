@@ -31,6 +31,9 @@ export type WorkOrderReport = {
   createdAt: Date;
   signatureData: string | null;
   signedBy: string | null;
+  technicianSignature: string | null;
+  technicianSignedBy: string | null;
+  technicianSignedAt: Date | null;
   customFields: unknown;
   customer: {
     name: string;
@@ -186,12 +189,16 @@ export async function renderWorkOrderPdf(report: WorkOrderReport, context: WorkO
     if (details.length) {
       heading("Dettagli");
       for (const row of details) {
-        doc.font("Helvetica").fontSize(10);
+        doc.font(row.missing ? "Helvetica-Oblique" : "Helvetica").fontSize(10);
         const rowH = doc.heightOfString(row.value, { width: width * 0.62 });
         ensure(rowH + 8);
         text(row.label, left, y, 10, { color: MUTED, width: width * 0.34 });
         const afterLabel = doc.y;
-        text(row.value, left + width * 0.36, y, 10, { width: width * 0.64 });
+        text(row.value, left + width * 0.36, y, 10, {
+          font: row.missing ? "Helvetica-Oblique" : "Helvetica",
+          color: row.missing ? MUTED : INK,
+          width: width * 0.64,
+        });
         sync(Math.max(afterLabel, doc.y) + 4);
       }
     }
@@ -215,15 +222,28 @@ export async function renderWorkOrderPdf(report: WorkOrderReport, context: WorkO
           const label = answer.label?.trim() || "Voce";
           const note = answer.note?.trim() || "";
           const checked = answer.checked === true;
-          const indent = note && !checked ? 0 : 18;
+          const status = checked ? "Eseguito" : "Non eseguito";
+          const statusW = 92;
+          const labelW = width - 18 - statusW - 8;
           doc.font("Helvetica").fontSize(10.5);
-          const labelH = doc.heightOfString(label, { width: width - indent });
-          const noteH = note ? doc.font("Helvetica").fontSize(9).heightOfString(note, { width: width - indent }) : 0;
+          const labelH = doc.heightOfString(label, { width: labelW });
+          const noteH = note ? doc.font("Helvetica").fontSize(9).heightOfString(note, { width: width - 18 }) : 0;
           ensure(labelH + noteH + 8);
-          if (!note || checked) drawCheck(doc, left, y + 1, checked, accent);
-          text(label, left + indent, y, 10.5, { width: width - indent });
-          if (note) text(note, left + indent, doc.y + 1, 9, { color: MUTED, width: width - indent });
-          sync(doc.y + 7);
+          drawCheck(doc, left, y + 1, checked, accent);
+          text(label, left + 18, y, 10.5, { width: labelW });
+          const afterLabel = doc.y;
+          text(status, left + width - statusW, y, 9, {
+            font: "Helvetica-Bold",
+            color: checked ? accent : MUTED,
+            width: statusW,
+            align: "right",
+          });
+          let bottom = Math.max(afterLabel, doc.y);
+          if (note) {
+            text(note, left + 18, bottom + 1, 9, { color: MUTED, width: width - 18 });
+            bottom = doc.y;
+          }
+          sync(bottom + 7);
         }
       }
     }
@@ -334,7 +354,18 @@ export async function renderWorkOrderPdf(report: WorkOrderReport, context: WorkO
     const boxH = 132;
     heading("Firme", boxH + 20);
     drawSignatureBox(doc, left, y, boxW, boxH, "Firma del cliente", report.signatureData, report.signedBy, formatWhen(report.completedAt), accent);
-    drawSignatureBox(doc, left + boxW + 12, y, boxW, boxH, `Firma del ${context.labels.technician.toLowerCase()}`, null, report.assignee?.name ?? null, null, accent, true);
+    drawSignatureBox(
+      doc,
+      left + boxW + 12,
+      y,
+      boxW,
+      boxH,
+      `Firma del ${context.labels.technician.toLowerCase()}`,
+      report.technicianSignature,
+      report.technicianSignedBy ?? report.assignee?.name ?? null,
+      formatWhen(report.technicianSignedAt),
+      accent,
+    );
     sync(y + boxH + 10);
     text("Il cliente conferma di aver preso visione dell'intervento descritto in questo rapportino.", left, y, 8.5, { color: MUTED, width });
     sync(doc.y);
@@ -412,18 +443,17 @@ function drawSignatureBox(
   name: string | null,
   when: string | null,
   accent: string,
-  handwritten = false,
 ) {
   doc.roundedRect(x, y, w, h, 8).lineWidth(0.8).strokeColor(LINE).stroke();
   doc.font("Helvetica-Bold").fontSize(7.5).fillColor(accent);
   doc.text(title.toUpperCase(), x + 12, y + 10, { width: w - 24, characterSpacing: 0.4 });
   const drawn = signature ? strokeSignature(doc, signature, x + 12, y + 28, w - 24, 62) : false;
-  if (!drawn && !handwritten) {
-    doc.font("Helvetica").fontSize(9).fillColor(MUTED);
+  if (!drawn) {
+    doc.font("Helvetica-Oblique").fontSize(9).fillColor(MUTED);
     doc.text("In attesa di firma", x + 12, y + 52, { width: w - 24 });
   }
   doc.moveTo(x + 12, y + h - 28).lineTo(x + w - 12, y + h - 28).lineWidth(0.6).strokeColor(RULE).stroke();
-  const caption = handwritten ? name || " " : name ? `Firmato da ${name}${when ? ` · ${when}` : ""}` : " ";
+  const caption = drawn && name ? `Firmato da ${name}${when ? ` · ${when}` : ""}` : name ? name : " ";
   doc.font("Helvetica").fontSize(8).fillColor(MUTED);
   doc.text(caption, x + 12, y + h - 22, { width: w - 24, height: 16 });
   return drawn;
@@ -468,19 +498,31 @@ function strokeSignature(doc: PDFKit.PDFDocument, raw: string, x: number, y: num
   return true;
 }
 
-function fieldLines(values: unknown, fields: WorkOrderPdfContext["fields"]): Array<{ label: string; value: string }> {
-  if (!values || typeof values !== "object" || Array.isArray(values)) return [];
-  const record = values as Record<string, unknown>;
-  const known = new Map(fields.map((field) => [field.key, field]));
-  const rows: Array<{ label: string; value: string }> = [];
+const NOT_INCLUDED = new Set(["no", "n", "false", "non incluso", "non inclusa", "escluso", "esclusa", "non eseguito", "non eseguita"]);
+
+function fieldLines(values: unknown, fields: WorkOrderPdfContext["fields"]): Array<{ label: string; value: string; missing: boolean }> {
+  const record = values && typeof values === "object" && !Array.isArray(values) ? (values as Record<string, unknown>) : {};
+  const rows: Array<{ label: string; value: string; missing: boolean }> = [];
+  const seen = new Set<string>();
+  for (const field of fields) {
+    if (field.type === "PHOTO") continue;
+    seen.add(field.key);
+    rows.push({ label: field.label, ...fieldState(field.type, record[field.key]) });
+  }
   for (const [key, raw] of Object.entries(record)) {
-    const field = known.get(key);
-    if (field?.type === "PHOTO") continue;
-    const value = formatField(field?.type ?? "TEXT", raw);
-    if (!value) continue;
-    rows.push({ label: field?.label ?? key, value });
+    if (seen.has(key)) continue;
+    const state = fieldState("TEXT", raw);
+    if (state.missing) continue;
+    rows.push({ label: key, ...state });
   }
   return rows;
+}
+
+function fieldState(type: string, raw: unknown): { value: string; missing: boolean } {
+  if (typeof raw === "boolean") return raw ? { value: "Incluso", missing: false } : { value: "Non incluso", missing: true };
+  const formatted = formatField(type, raw);
+  if (!formatted || NOT_INCLUDED.has(formatted.trim().toLowerCase())) return { value: "Non incluso", missing: true };
+  return { value: formatted, missing: false };
 }
 
 function formatField(type: string, value: unknown): string | null {

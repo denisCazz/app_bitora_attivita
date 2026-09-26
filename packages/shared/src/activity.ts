@@ -251,5 +251,6 @@ export function overlayVocab(base: Vocab, presets?: TenantActivityPresets | null
     scheduleKinds,
     stations: presets.stations?.length ? presets.stations : base.stations,
     dashboard: base.dashboard,
+    ledger: base.ledger,
   };
 }

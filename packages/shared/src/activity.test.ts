@@ -58,8 +58,8 @@ describe("trialKeys", () => {
 
 describe("generic shop manifest", () => {
   const defs: ModuleDefRow[] = [
-    { key: "dashboard", label: "Home", description: "", pitch: "", icon: "grid-outline", priceCents: 0, trialDays: 0, requires: [], sortOrder: 0, active: true },
-    { key: "work_orders", label: "Interventi", description: "", pitch: "", icon: "construct-outline", priceCents: 900, trialDays: 14, requires: [], sortOrder: 1, active: true },
+    { key: "dashboard", label: "Home", description: "", pitch: "", details: "", features: [], icon: "grid-outline", priceCents: 0, trialDays: 0, requires: [], sortOrder: 0, active: true },
+    { key: "work_orders", label: "Interventi", description: "", pitch: "", details: "", features: [], icon: "construct-outline", priceCents: 900, trialDays: 14, requires: [], sortOrder: 1, active: true },
   ];
   const generic: CategoryNode = {
     id: "cat_generic",

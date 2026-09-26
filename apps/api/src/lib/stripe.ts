@@ -17,6 +17,10 @@ export function stripeClient(): Stripe | null {
   return client;
 }
 
+export function stripeFor(secretKey: string) {
+  return new Stripe(secretKey, { apiVersion: API_VERSION });
+}
+
 export function moduleProductId(key: string) {
   return `bitora_mod_${key}`;
 }

@@ -58,6 +58,23 @@ export const env = {
   stripeSecretKey: process.env.STRIPE_SECRET_KEY,
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
   billingDemo: process.env.BILLING_DEMO === "true",
+  apple: {
+    bundleId: process.env.APPLE_BUNDLE_ID ?? "app.bitora.mobile",
+    appAppleId: process.env.APPLE_APP_ID ? Number(process.env.APPLE_APP_ID) : undefined,
+    allowSandbox: process.env.APPLE_ALLOW_SANDBOX !== "false",
+    teamId: process.env.APPLE_TEAM_ID,
+    signInKeyId: process.env.APPLE_SIGNIN_KEY_ID,
+    signInPrivateKey: process.env.APPLE_SIGNIN_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+  },
+  google: {
+    oauthClientIds: (process.env.GOOGLE_OAUTH_CLIENT_IDS ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
+    packageName: process.env.GOOGLE_PACKAGE_NAME ?? "app.bitora.mobile",
+    serviceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
+    allowTestPurchases: process.env.GOOGLE_ALLOW_TEST_PURCHASES !== "false",
+  },
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
     model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
@@ -74,6 +91,17 @@ export const env = {
       voiceId: process.env.ELEVENLABS_VOICE_ID,
       model: process.env.ELEVENLABS_MODEL ?? "eleven_flash_v2_5",
     },
+  },
+  legal: {
+    company: process.env.LEGAL_COMPANY_NAME,
+    vatNumber: process.env.LEGAL_VAT_NUMBER,
+    address: process.env.LEGAL_ADDRESS,
+    rea: process.env.LEGAL_REA,
+    pec: process.env.LEGAL_PEC,
+    email: process.env.LEGAL_PRIVACY_EMAIL,
+    dpoEmail: process.env.LEGAL_DPO_EMAIL,
+    court: process.env.LEGAL_COURT,
+    hosting: process.env.LEGAL_HOSTING_PROVIDER,
   },
   s3: process.env.S3_BUCKET
     ? {

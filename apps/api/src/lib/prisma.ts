@@ -28,12 +28,13 @@ const TENANT_MODELS = new Set([
   "Order",
   "OrderLine",
   "Ingredient",
-  "Recipe",
-  "RecipeLine",
   "Supplier",
   "PurchaseOrder",
   "PurchaseOrderLine",
   "Shift",
+  "LedgerEntry",
+  "PayrollPosting",
+  "WorkOrderPayment",
   "Notification",
 ]);
 

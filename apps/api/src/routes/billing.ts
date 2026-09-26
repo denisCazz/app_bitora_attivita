@@ -1,4 +1,4 @@
-import { checkoutSchema, isModuleKey, seatsSchema, trialSchema, type ModuleKey } from "@rapportini/shared";
+import { checkoutSchema, isDemoEmail, isModuleKey, seatsSchema, storePurchaseSchema, storeSyncSchema, trialSchema, type ModuleKey } from "@rapportini/shared";
 import type { FastifyInstance } from "fastify";
 import type Stripe from "stripe";
 import { categoryOfTenant } from "../lib/catalog";
@@ -6,18 +6,26 @@ import { env } from "../env";
 import { HttpError, must, parseBody } from "../errors";
 import { prisma } from "../lib/prisma";
 import { applyExtraSeats } from "../lib/seats";
+import { applyStoreRecord, verifyAppleNotification, verifyAppleTransaction, verifyGooglePurchase } from "../lib/store-billing";
 import { ensureModulePrice, extraSeatPriceId, integrationIdentifier, isStripeMissing, stripeClient, stripeMessage } from "../lib/stripe";
 import { tenantId } from "../plugins/auth";
 import { permit } from "../plugins/guards";
 
 async function licenseModules(tenant: string, keys: ModuleKey[], subscriptionId: string | null) {
+  const billingSource = subscriptionId ? ("STRIPE" as const) : ("DEMO" as const);
   for (const moduleKey of keys) {
     await prisma.tenantModule.upsert({
       where: { tenantId_moduleKey: { tenantId: tenant, moduleKey } },
-      create: { tenantId: tenant, moduleKey, enabled: true, licensed: true, stripeSubscriptionId: subscriptionId },
-      update: { enabled: true, licensed: true, stripeSubscriptionId: subscriptionId },
+      create: { tenantId: tenant, moduleKey, enabled: true, licensed: true, billingSource, stripeSubscriptionId: subscriptionId },
+      update: { enabled: true, licensed: true, billingSource, licenseExpiresAt: null, stripeSubscriptionId: subscriptionId },
     });
   }
+}
+
+async function verifyStorePurchase(purchase: { platform: "ios" | "android"; purchaseToken: string; productId: string }) {
+  const record = purchase.platform === "ios" ? await verifyAppleTransaction(purchase.purchaseToken) : await verifyGooglePurchase(purchase.purchaseToken);
+  if (record.productId !== purchase.productId) throw new HttpError(400, "La ricevuta non corrisponde al prodotto");
+  return record;
 }
 
 async function paidModulesFor(tenant: string, keys: ModuleKey[]) {
@@ -101,10 +109,13 @@ export async function billingRoutes(app: FastifyInstance) {
     const id = tenantId(request);
     const { record, modules } = await paidModulesFor(id, body.moduleKeys);
     const keys = modules.map((module) => module.key);
+    const owned = await prisma.tenantModule.findMany({ where: { tenantId: id, moduleKey: { in: keys }, licensed: true } });
+    if (owned.some((row) => !row.licenseExpiresAt || row.licenseExpiresAt > new Date())) throw new HttpError(409, "Modulo già attivo");
     const stripe = stripeClient();
 
     if (!stripe) {
-      if (!env.billingDemo) throw new HttpError(503, "Pagamenti non ancora configurati");
+      const user = request.auth?.userId ? await prisma.user.findUnique({ where: { id: request.auth.userId }, select: { email: true } }) : null;
+      if (!env.billingDemo || isDemoEmail(user?.email ?? "")) throw new HttpError(503, "Pagamenti con carta non configurati: imposta le chiavi Stripe (anche di test) per provare l'acquisto");
       await licenseModules(id, keys, null);
       return { mode: "demo" as const };
     }
@@ -139,6 +150,66 @@ export async function billingRoutes(app: FastifyInstance) {
       if (error instanceof HttpError) throw error;
       throw new HttpError(502, stripeMessage(error));
     }
+  });
+
+  app.get("/billing/store/account", { preHandler: manage }, async (request) => {
+    const record = await must(prisma.tenant.findUnique({ where: { id: tenantId(request) }, select: { storeAccountToken: true } }), "Negozio");
+    return { accountToken: record.storeAccountToken };
+  });
+
+  app.post("/billing/store/verify", { preHandler: manage }, async (request) => {
+    const purchase = parseBody(storePurchaseSchema, request.body);
+    return applyStoreRecord(await verifyStorePurchase(purchase), tenantId(request));
+  });
+
+  app.post("/billing/store/sync", { preHandler: manage }, async (request) => {
+    const { purchases } = parseBody(storeSyncSchema, request.body);
+    const id = tenantId(request);
+    const results = [];
+    for (const purchase of purchases) {
+      try {
+        const applied = await applyStoreRecord(await verifyStorePurchase(purchase), id);
+        results.push({ productId: purchase.productId, ok: true as const, active: applied.active });
+      } catch (error) {
+        results.push({ productId: purchase.productId, ok: false as const, error: error instanceof Error ? error.message : "Errore" });
+      }
+    }
+    return { results };
+  });
+
+  app.post("/billing/apple/notifications", async (request, reply) => {
+    const signedPayload = (request.body as { signedPayload?: unknown } | undefined)?.signedPayload;
+    if (typeof signedPayload !== "string") return reply.code(400).send({ error: "Notifica non valida" });
+    let verified: Awaited<ReturnType<typeof verifyAppleNotification>>;
+    try {
+      verified = await verifyAppleNotification(signedPayload);
+    } catch {
+      return reply.code(400).send({ error: "Firma non valida" });
+    }
+    if (verified.record) {
+      await applyStoreRecord(verified.record).catch((error: unknown) => request.log.warn({ error, type: verified.notification.notificationType }, "Notifica App Store non applicata"));
+    }
+    return { received: true };
+  });
+
+  app.post("/billing/google/notifications", async (request) => {
+    const encoded = (request.body as { message?: { data?: unknown } } | undefined)?.message?.data;
+    if (typeof encoded !== "string") return { received: true };
+    let message: { packageName?: string; subscriptionNotification?: { purchaseToken?: string }; voidedPurchaseNotification?: { purchaseToken?: string } };
+    try {
+      message = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+    } catch {
+      return { received: true };
+    }
+    const token = message.subscriptionNotification?.purchaseToken ?? message.voidedPurchaseNotification?.purchaseToken;
+    if (message.packageName === env.google.packageName && token) {
+      try {
+        await applyStoreRecord(await verifyGooglePurchase(token));
+      } catch (error) {
+        request.log.warn({ error }, "Notifica Google Play non applicata");
+      }
+    }
+    return { received: true };
   });
 
   app.post("/billing/seats", { preHandler: manage }, async (request) => {
@@ -268,7 +339,7 @@ export async function billingRoutes(app: FastifyInstance) {
         if (seatTenant) await applyExtraSeats(seatTenant.id, 0, null);
         await prisma.tenantModule.updateMany({
           where: { stripeSubscriptionId: subscription },
-          data: { licensed: false, stripeSubscriptionId: null },
+          data: { licensed: false, billingSource: null, stripeSubscriptionId: null },
         });
       }
 

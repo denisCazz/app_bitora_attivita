@@ -39,7 +39,7 @@ export default function ChecklistsScreen() {
   const notes = runs.data?.filter((entry) => !entry.template) ?? [];
   const registered = runs.data?.filter((entry) => entry.template) ?? [];
   return (
-    <Screen>
+    <Screen onRefresh={() => query.refetch()}>
       <Text variant="display">Checklist</Text>
       <FreeChecklist onSaved={() => void runs.refetch()} />
       {notes.map((entry) => (
@@ -52,7 +52,10 @@ export default function ChecklistsScreen() {
         <Card key={entry.id} style={{ gap: 4 }}>
           <Text variant="heading">{entry.template?.name}</Text>
           {entry.answers.map((answer, index) => (
-            <Text key={index}>{`${answer.checked ? "✓ " : "· "}${answer.label || "Voce"}`}</Text>
+            <Text key={index}>
+              <Text muted={!answer.checked}>{answer.checked ? "Eseguito" : "Non eseguito"}</Text>
+              {` · ${answer.label || "Voce"}`}
+            </Text>
           ))}
         </Card>
       ))}

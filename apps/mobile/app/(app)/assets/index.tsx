@@ -54,7 +54,7 @@ export default function AssetsScreen() {
   });
 
   return (
-    <Screen>
+    <Screen onRefresh={() => query.refetch()}>
       <Text variant="display">{terms?.assets ?? "Impianti"}</Text>
       <QueryState isLoading={query.isLoading} error={query.error} refetch={() => query.refetch()}>
         {query.data?.length ? (

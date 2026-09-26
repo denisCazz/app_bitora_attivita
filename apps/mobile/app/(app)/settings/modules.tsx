@@ -56,7 +56,7 @@ export default function ModulesScreen() {
             {!row.free && row.status !== "locked" && row.status !== "trial" ? <Badge tone="accent" label={monthly(row.priceCents)} /> : null}
           </View>
           {row.status === "locked" ? (
-            <Button tone="secondary" label={`Sblocca · ${monthly(row.priceCents)}`} onPress={() => router.push({ pathname: "/(app)/store", params: { module: row.moduleKey } })} />
+            <Button tone="secondary" label={`Sblocca · ${monthly(row.priceCents)}`} onPress={() => router.push({ pathname: "/(app)/store/[key]", params: { key: row.moduleKey } })} />
           ) : null}
         </Card>
       ))}

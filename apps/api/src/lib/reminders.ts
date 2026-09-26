@@ -147,7 +147,7 @@ async function remindLowStock(directory: Map<string, Member[]>): Promise<Alert[]
     }),
   ]);
   const lowParts = partBalances.filter((row) => row.partId && num(row._sum.quantity) <= LOW_STOCK_QTY);
-  const lowIngredients = ingredientBalances.filter((row) => row.ingredientId && num(row._sum.quantity) <= LOW_STOCK_QTY);
+  const ingredientQty = new Map(ingredientBalances.flatMap((row) => (row.ingredientId ? [[row.ingredientId, num(row._sum.quantity)] as const] : [])));
   const [parts, ingredients] = await Promise.all([
     lowParts.length
       ? prisma.sparePart.findMany({
@@ -155,15 +155,17 @@ async function remindLowStock(directory: Map<string, Member[]>): Promise<Alert[]
           select: { id: true, name: true },
         })
       : [],
-    lowIngredients.length
-      ? prisma.ingredient.findMany({
-          where: { id: { in: lowIngredients.flatMap((row) => (row.ingredientId ? [row.ingredientId] : [])) } },
-          select: { id: true, name: true },
-        })
-      : [],
+    prisma.ingredient.findMany({
+      where: { OR: [{ minQuantity: { gt: 0 } }, { id: { in: [...ingredientQty.keys()] } }] },
+      select: { id: true, tenantId: true, name: true, unit: true, minQuantity: true },
+    }),
   ]);
   const partNames = new Map(parts.map((part) => [part.id, part.name]));
-  const ingredientNames = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient.name]));
+  const lowIngredients = ingredients.flatMap((ingredient) => {
+    const qty = ingredientQty.get(ingredient.id) ?? 0;
+    const min = ingredient.minQuantity == null ? 0 : num(ingredient.minQuantity);
+    return qty <= 0 || (min > 0 && qty <= min) ? [{ ...ingredient, qty, min }] : [];
+  });
   const alerts: Alert[] = [];
   for (const row of lowParts) {
     if (!row.partId) continue;
@@ -181,19 +183,15 @@ async function remindLowStock(directory: Map<string, Member[]>): Promise<Alert[]
       });
     }
   }
-  for (const row of lowIngredients) {
-    if (!row.ingredientId) continue;
-    const name = ingredientNames.get(row.ingredientId);
-    if (!name) continue;
-    const qty = num(row._sum.quantity);
-    for (const member of recipients(directory, row.tenantId, "inventory.read")) {
+  for (const item of lowIngredients) {
+    for (const member of recipients(directory, item.tenantId, "inventory.read")) {
       alerts.push({
-        tenantId: row.tenantId,
+        tenantId: item.tenantId,
         userId: member.userId,
-        title: qty <= 0 ? "Scorta esaurita" : "Sotto scorta",
-        body: `${name} · giacenza ${formatQty(qty)}`,
+        title: item.qty <= 0 ? "Scorta esaurita" : "Sotto scorta",
+        body: `${item.name} · ${formatQty(Math.max(item.qty, 0))} ${item.unit}${item.min > 0 ? ` su minimo ${formatQty(item.min)}` : ""}`,
         href: "/inventory",
-        dedupeKey: `stock:ingredient:${row.ingredientId}`,
+        dedupeKey: `stock:ingredient:${item.id}`,
       });
     }
   }

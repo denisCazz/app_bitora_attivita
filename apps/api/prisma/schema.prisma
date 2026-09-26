@@ -72,20 +72,53 @@ enum ShiftStatus {
   CANCELLED
 }
 
+enum BillingSource {
+  STRIPE
+  APPLE
+  GOOGLE
+  DEMO
+}
+
+enum StorePlatform {
+  APPLE
+  GOOGLE
+}
+
+enum LedgerKind {
+  INCOME
+  EXPENSE
+}
+
+enum WorkPaymentStatus {
+  DUE
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
 model User {
-  id             String         @id @default(cuid())
-  email          String         @unique
-  name           String
-  passwordHash   String
-  activeTenantId String?
-  platformAdmin  Boolean        @default(false)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  memberships    Membership[]
-  refreshTokens  RefreshToken[]
-  pushTokens     PushToken[]
-  shifts         Shift[]
-  assignedOrders WorkOrder[]    @relation("Assignee")
+  id                String           @id @default(cuid())
+  email             String           @unique
+  name              String
+  /// Null for accounts created with Apple or Google.
+  passwordHash      String?
+  appleSub          String?          @unique
+  /// Needed to revoke Sign in with Apple when the account is deleted (App Store rule 5.1.1).
+  appleRefreshToken String?
+  googleSub         String?          @unique
+  activeTenantId    String?
+  platformAdmin     Boolean          @default(false)
+  termsVersion      String?
+  termsAcceptedAt   DateTime?
+  aiConsentAt       DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  memberships       Membership[]
+  refreshTokens     RefreshToken[]
+  pushTokens        PushToken[]
+  shifts            Shift[]
+  assignedOrders    WorkOrder[]      @relation("Assignee")
+  payrollPostings   PayrollPosting[]
 }
 
 model RefreshToken {
@@ -124,6 +157,7 @@ model Tenant {
   stripeCustomerId          String?             @unique
   extraSeats                Int                 @default(0)
   seatsStripeSubscriptionId String?
+  storeAccountToken         String              @unique @default(dbgenerated("(gen_random_uuid())::text"))
   createdAt                 DateTime            @default(now())
   updatedAt                 DateTime            @updatedAt
   locations                 Location[]
@@ -148,14 +182,16 @@ model Tenant {
   orders                    Order[]
   orderLines                OrderLine[]
   ingredients               Ingredient[]
-  recipes                   Recipe[]
-  recipeLines               RecipeLine[]
   suppliers                 Supplier[]
   purchaseOrders            PurchaseOrder[]
   purchaseOrderLines        PurchaseOrderLine[]
   shifts                    Shift[]
+  ledgerEntries             LedgerEntry[]
+  payrollPostings           PayrollPosting[]
+  workOrderPayments         WorkOrderPayment[]
   invites                   Invite[]
   notifications             Notification[]
+  storePurchases            StorePurchase[]
 
   @@index([categoryId])
   @@index([seatsStripeSubscriptionId])
@@ -208,6 +244,8 @@ model ModuleDef {
   label           String
   description     String           @default("")
   pitch           String           @default("")
+  details         String           @default("")
+  features        String[]         @default([])
   icon            String           @default("apps-outline")
   priceCents      Int              @default(0)
   trialDays       Int              @default(14)
@@ -287,16 +325,21 @@ model Role {
 }
 
 model Membership {
-  id        String           @id @default(cuid())
-  userId    String
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tenantId  String
-  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  roleId    String
-  role      Role             @relation(fields: [roleId], references: [id])
-  status    MembershipStatus @default(ACTIVE)
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  id           String           @id @default(cuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId     String
+  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  roleId       String
+  role         Role             @relation(fields: [roleId], references: [id])
+  status       MembershipStatus @default(ACTIVE)
+  /// Ordinary hourly wage. Null means this person is not on payroll.
+  hourlyRate   Decimal?         @db.Decimal(8, 2)
+  overtimeRate Decimal?         @db.Decimal(8, 2)
+  /// Hours per Monday–Sunday week paid at the ordinary rate. The rest is overtime.
+  weeklyHours  Decimal          @default(40) @db.Decimal(5, 2)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 
   @@unique([userId, tenantId])
   @@index([tenantId])
@@ -320,21 +363,42 @@ model Invite {
 }
 
 model TenantModule {
-  id                   String    @id @default(cuid())
+  id                   String         @id @default(cuid())
   tenantId             String
-  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant               Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   moduleKey            String
-  enabled              Boolean   @default(true)
-  config               Json      @default("{}")
-  licensed             Boolean   @default(false)
+  enabled              Boolean        @default(true)
+  config               Json           @default("{}")
+  licensed             Boolean        @default(false)
+  billingSource        BillingSource?
+  licenseExpiresAt     DateTime?
   trialEndsAt          DateTime?
   stripeSubscriptionId String?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
   @@unique([tenantId, moduleKey])
   @@index([stripeSubscriptionId])
   @@index([tenantId])
+}
+
+model StorePurchase {
+  id           String        @id @default(cuid())
+  tenantId     String
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  platform     StorePlatform
+  purchaseKey  String
+  productId    String
+  moduleKey    String
+  environment  String
+  active       Boolean       @default(false)
+  autoRenewing Boolean       @default(false)
+  expiresAt    DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([platform, purchaseKey])
+  @@index([tenantId, moduleKey])
 }
 
 model CustomFieldDef {
@@ -355,20 +419,22 @@ model CustomFieldDef {
 }
 
 model Customer {
-  id           String      @id @default(cuid())
-  tenantId     String
-  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name         String
-  phone        String?
-  email        String?
-  address      String?
-  city         String?
-  notes        String?
-  customFields Json        @default("{}")
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  assets       Asset[]
-  workOrders   WorkOrder[]
+  id            String             @id @default(cuid())
+  tenantId      String
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String
+  phone         String?
+  email         String?
+  address       String?
+  city          String?
+  notes         String?
+  customFields  Json               @default("{}")
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  assets        Asset[]
+  workOrders    WorkOrder[]
+  ledgerEntries LedgerEntry[]
+  payments      WorkOrderPayment[]
 
   @@index([tenantId, name])
 }
@@ -400,29 +466,34 @@ model Asset {
 }
 
 model WorkOrder {
-  id              String          @id @default(cuid())
-  tenantId        String
-  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customerId      String?
-  customer        Customer?       @relation(fields: [customerId], references: [id])
-  assetId         String?
-  asset           Asset?          @relation(fields: [assetId], references: [id])
-  assigneeId      String?
-  assignee        User?           @relation("Assignee", fields: [assigneeId], references: [id])
-  title           String
-  description     String?
-  status          WorkOrderStatus @default(DRAFT)
-  scheduledAt     DateTime?
-  durationMinutes Int?
-  completedAt     DateTime?
-  signatureData   String?
-  signedBy        String?
-  customFields    Json            @default("{}")
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  checklistRuns   ChecklistRun[]
-  attachments     Attachment[]
-  stockMovements  StockMovement[]
+  id                  String            @id @default(cuid())
+  tenantId            String
+  tenant              Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId          String?
+  customer            Customer?         @relation(fields: [customerId], references: [id])
+  assetId             String?
+  asset               Asset?            @relation(fields: [assetId], references: [id])
+  assigneeId          String?
+  assignee            User?             @relation("Assignee", fields: [assigneeId], references: [id])
+  title               String
+  description         String?
+  status              WorkOrderStatus   @default(DRAFT)
+  scheduledAt         DateTime?
+  durationMinutes     Int?
+  completedAt         DateTime?
+  signatureData       String?
+  signedBy            String?
+  technicianSignature String?
+  technicianSignedBy  String?
+  technicianSignedAt  DateTime?
+  customFields        Json              @default("{}")
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  checklistRuns       ChecklistRun[]
+  attachments         Attachment[]
+  stockMovements      StockMovement[]
+  ledgerEntries       LedgerEntry[]
+  payment             WorkOrderPayment?
 
   @@index([tenantId, status])
   @@index([tenantId, scheduledAt])
@@ -584,7 +655,6 @@ model MenuItem {
   updatedAt    DateTime           @updatedAt
   modifiers    MenuItemModifier[]
   lines        OrderLine[]
-  recipe       Recipe?
 
   @@index([tenantId, category])
 }
@@ -664,55 +734,40 @@ model Ingredient {
   name          String
   unit          String
   sku           String?
+  category      String?
+  barcode       String?
+  minQuantity   Decimal?            @db.Decimal(12, 3)
+  unitCost      Decimal?            @db.Decimal(10, 2)
+  supplierId    String?
+  supplier      Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
-  recipeLines   RecipeLine[]
   movements     StockMovement[]
   purchaseLines PurchaseOrderLine[]
 
   @@index([tenantId, name])
-}
-
-model Recipe {
-  id         String       @id @default(cuid())
-  tenantId   String
-  tenant     Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  menuItemId String       @unique
-  menuItem   MenuItem     @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
-  lines      RecipeLine[]
-
-  @@index([tenantId])
-}
-
-model RecipeLine {
-  id           String     @id @default(cuid())
-  tenantId     String
-  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  recipeId     String
-  recipe       Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
-  ingredientId String
-  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
-  quantity     Decimal    @db.Decimal(12, 3)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-
-  @@index([tenantId])
-  @@index([recipeId])
+  @@index([tenantId, barcode])
+  @@index([supplierId])
 }
 
 model Supplier {
-  id        String          @id @default(cuid())
-  tenantId  String
-  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name      String
-  email     String?
-  phone     String?
-  notes     String?
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  orders    PurchaseOrder[]
+  id            String          @id @default(cuid())
+  tenantId      String
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String
+  vat           String?
+  contactName   String?
+  email         String?
+  phone         String?
+  address       String?
+  city          String?
+  paymentTerms  String?
+  notes         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  orders        PurchaseOrder[]
+  ledgerEntries LedgerEntry[]
+  ingredients   Ingredient[]
 
   @@index([tenantId, name])
 }
@@ -724,6 +779,9 @@ model PurchaseOrder {
   supplierId String
   supplier   Supplier            @relation(fields: [supplierId], references: [id])
   status     PurchaseOrderStatus @default(DRAFT)
+  notes      String?
+  expectedAt DateTime?
+  receivedAt DateTime?
   createdAt  DateTime            @default(now())
   updatedAt  DateTime            @updatedAt
   lines      PurchaseOrderLine[]
@@ -764,6 +822,82 @@ model Shift {
 
   @@index([tenantId, startsAt])
   @@index([userId])
+}
+
+model LedgerEntry {
+  id             String            @id @default(cuid())
+  tenantId       String
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  kind           LedgerKind
+  date           DateTime
+  amount         Decimal           @db.Decimal(12, 2)
+  vatRate        Decimal           @default(0) @db.Decimal(5, 2)
+  category       String
+  description    String?
+  method         String?
+  paid           Boolean           @default(true)
+  customerId     String?
+  customer       Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  supplierId     String?
+  supplier       Supplier?         @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  workOrderId    String?
+  workOrder      WorkOrder?        @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+  workPayment    WorkOrderPayment?
+  payrollPosting PayrollPosting?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([tenantId, date])
+  @@index([tenantId, kind, paid])
+  @@index([customerId])
+  @@index([supplierId])
+  @@index([workOrderId])
+}
+
+model WorkOrderPayment {
+  id             String            @id @default(cuid())
+  tenantId       String
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workOrderId    String            @unique
+  workOrder      WorkOrder         @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  customerId     String?
+  customer       Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  amount         Decimal           @db.Decimal(12, 2)
+  paidAmount     Decimal           @default(0) @db.Decimal(12, 2)
+  status         WorkPaymentStatus @default(DUE)
+  method         String?
+  token          String            @unique
+  note           String?
+  sentEmailAt    DateTime?
+  sentWhatsappAt DateTime?
+  paidAt         DateTime?
+  ledgerEntryId  String?           @unique
+  ledgerEntry    LedgerEntry?      @relation(fields: [ledgerEntryId], references: [id], onDelete: SetNull)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([tenantId, status])
+  @@index([customerId])
+}
+
+model PayrollPosting {
+  id            String      @id @default(cuid())
+  tenantId      String
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Calendar month in Europe/Rome, YYYY-MM. Rates are snapshotted so later raises do not rewrite closed months.
+  month         String
+  hourlyRate    Decimal     @db.Decimal(8, 2)
+  overtimeRate  Decimal     @db.Decimal(8, 2)
+  weeklyHours   Decimal     @db.Decimal(5, 2)
+  ledgerEntryId String      @unique
+  ledgerEntry   LedgerEntry @relation(fields: [ledgerEntryId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([tenantId, userId, month])
+  @@index([tenantId, month])
 }
 
 model Notification {

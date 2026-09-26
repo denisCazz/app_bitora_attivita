@@ -210,7 +210,7 @@ function ModulesSection({ category, preview }: { category: AdminCategory; previe
   return (
     <Section
       title="Moduli"
-      hint="Ogni modulo è in vendita a tutti. Qui decidi cosa è gratis, cosa proponiamo per primo (consigliato), cosa sta nel menu e cosa nascondere. Nome e testo vuoti usano il modello del catalogo."
+      hint="La categoria vende solo i moduli elencati qui o nella categoria padre: gli altri restano nascosti. Qui decidi cosa è gratis, cosa proponiamo per primo (consigliato), cosa sta nel menu e cosa nascondere. Nome e testo vuoti usano il modello del catalogo."
     >
       {catalog.data?.modules.map((definition) => {
         const own = category.modules.find((row) => row.moduleKey === definition.key);

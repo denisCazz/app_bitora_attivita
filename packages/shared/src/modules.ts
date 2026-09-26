@@ -18,6 +18,7 @@ export const MODULE_KEYS = [
   "inventory",
   "suppliers",
   "shifts",
+  "accounting",
   "settings",
 ] as const;
 
@@ -43,6 +44,7 @@ export const MODULE_CODE: Record<ModuleKey, ModuleCode> = {
   inventory: { route: "/inventory", permission: "inventory.read" },
   suppliers: { route: "/suppliers", permission: "suppliers.read" },
   shifts: { route: "/shifts", permission: "shifts.read" },
+  accounting: { route: "/accounting", permission: "accounting.read" },
   settings: { route: "/settings", permission: "settings.manage" },
 };
 

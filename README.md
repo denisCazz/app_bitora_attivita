@@ -5,7 +5,7 @@ App iOS e Android per la manutenzione, che cambia in base al mestiere del negozi
 Tre categorie iniziali:
 
 - **Tecnici stufe**: impianti, pulizie annuali, controllo fumi, ricambi, furgone, rapportino PDF.
-- **Bar e ristoranti**: sala, comande per bar e cucina, menu con varianti, conto diviso, magazzino e ricette, fornitori, turni, checklist HACCP.
+- **Bar e ristoranti**: sala, comande per bar e cucina, menu con varianti, conto diviso, scorte con sottoscorta e riordino, fornitori, turni, checklist HACCP.
 - **Centri benessere**: agenda, schede cliente e trattamenti per unghie, parrucchieri e spa. Listino, turni, prodotti e igiene sono moduli extra.
 
 Ogni negozio configura ruoli, permessi, campi, checklist, moduli, colore e parole usate nell'interfaccia. All'avvio l'app legge `GET /me/manifest` e costruisce da lì menu e schermate.

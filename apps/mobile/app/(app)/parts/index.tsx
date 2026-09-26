@@ -32,7 +32,7 @@ export default function PartsScreen() {
   });
 
   return (
-    <Screen>
+    <Screen onRefresh={() => query.refetch()}>
       <Text variant="display">Ricambi</Text>
       <Input label="Cerca nome o codice" value={q} onChangeText={setQ} />
       <Input label="Compatibile con il modello" value={model} onChangeText={setModel} />

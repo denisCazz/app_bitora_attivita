@@ -5,69 +5,42 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { Badge, Button, Card, Glass, Screen, Text, useTheme } from "@rapportini/ui";
-import { http } from "../../src/api/client";
-import { queryClient } from "../../src/api/query";
-import { daysLeft, monthly, useBillingPortal, useCheckout, useStartTrial } from "../../src/billing";
-import { Chip } from "../../src/components/Chip";
-import { can, useManifest } from "../../src/session";
+import { Badge, Button, Card, Glass, Pressy, Screen, Text, useTheme } from "@rapportini/ui";
+import { http } from "../../../src/api/client";
+import { queryClient } from "../../../src/api/query";
+import { daysLeft, monthly, useBillingPortal, useRestorePurchases } from "../../../src/billing";
+import { Chip } from "../../../src/components/Chip";
+import { ModuleIcon } from "../../../src/components/ModuleIcon";
+import { IN_APP_PURCHASES, manageSubscriptions, STORE_NAME } from "../../../src/iap";
+import { can, useManifest } from "../../../src/session";
 
-function ModuleIcon({ name, active }: { name: string; active?: boolean }) {
+function Offer({ module, highlighted }: { module: ManifestModule; highlighted: boolean }) {
   const theme = useTheme();
-  return (
-    <View style={{ width: 44, height: 44, borderRadius: 15, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.accentSoft }}>
-      {active ? <LinearGradient colors={[theme.colors.accent, theme.colors.accentAlt]} style={StyleSheet.absoluteFill} /> : null}
-      <Ionicons name={name as keyof typeof Ionicons.glyphMap} size={22} color={active ? theme.colors.accentInk : theme.colors.accent} />
-    </View>
-  );
-}
-
-function Offer({ module, highlighted, canBuy }: { module: ManifestModule; highlighted: boolean; canBuy: boolean }) {
-  const theme = useTheme();
-  const trial = useStartTrial();
-  const checkout = useCheckout();
-  const [error, setError] = useState("");
+  const router = useRouter();
   const inTrial = module.status === "trial";
   const trialUsed = Boolean(module.trialEndsAt) && !inTrial;
-
-  function run(action: Promise<unknown>) {
-    setError("");
-    action.catch((caught: Error) => setError(caught.message));
-  }
+  const open = () => router.push({ pathname: "/(app)/store/[key]", params: { key: module.key } });
 
   return (
-    <Card style={{ gap: 12, borderColor: highlighted ? theme.colors.accent : theme.colors.glassBorder, borderWidth: highlighted ? 1.5 : 1 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-        <ModuleIcon name={module.icon} active={inTrial} />
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text variant="heading">{module.label}</Text>
-          <Text variant="caption" muted>
-            {module.pitch}
-          </Text>
+    <Pressy onPress={open} style={{ borderRadius: theme.radius.lg }}>
+      <Card style={{ gap: 12, borderColor: highlighted ? theme.colors.accent : theme.colors.glassBorder, borderWidth: highlighted ? 1.5 : 1 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <ModuleIcon name={module.icon} active={inTrial} />
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text variant="heading">{module.label}</Text>
+            <Text variant="caption" muted>
+              {module.pitch}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.colors.inkSoft} />
         </View>
-      </View>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-        <Text variant="heading">{monthly(module.priceCents)}</Text>
-        {inTrial ? <Badge tone="accent" label={`Prova · ${daysLeft(module.trialEndsAt)} giorni`} /> : trialUsed ? <Badge label="Prova terminata" /> : null}
-      </View>
-      {canBuy ? (
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          {!inTrial && !trialUsed && module.trialDays > 0 ? (
-            <Button style={{ flex: 1 }} tone="secondary" label={`Prova ${module.trialDays} giorni`} loading={trial.isPending} onPress={() => run(trial.mutateAsync(module.key))} />
-          ) : null}
-          <Button style={{ flex: 1 }} label={inTrial ? "Tienilo" : "Sblocca"} loading={checkout.isPending} onPress={() => run(checkout.mutateAsync([module.key]))} />
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text variant="heading">{monthly(module.priceCents)}</Text>
+          {inTrial ? <Badge tone="accent" label={`Prova · ${daysLeft(module.trialEndsAt)} giorni`} /> : trialUsed ? <Badge label="Prova terminata" /> : null}
         </View>
-      ) : (
-        <Text variant="caption" muted>
-          Chiedi al titolare di sbloccarlo.
-        </Text>
-      )}
-      {error ? (
-        <Text variant="caption" style={{ color: theme.colors.danger }}>
-          {error}
-        </Text>
-      ) : null}
-    </Card>
+        <Button tone="secondary" label="Scopri cosa fa" onPress={open} />
+      </Card>
+    </Pressy>
   );
 }
 
@@ -101,9 +74,9 @@ export default function StoreScreen() {
   const theme = useTheme();
   const manifest = useManifest();
   const params = useLocalSearchParams<{ module?: string }>();
-  const checkout = useCheckout();
   const portal = useBillingPortal();
-  const [portalError, setPortalError] = useState("");
+  const restore = useRestorePurchases();
+  const [message, setMessage] = useState("");
   const modules = manifest.data?.modules ?? [];
   const canBuy = can(manifest.data, "settings.manage");
   const included = modules.filter((module) => module.free);
@@ -113,9 +86,22 @@ export default function StoreScreen() {
     .sort((a, b) => Number(b.key === params.module) - Number(a.key === params.module) || b.score - a.score);
   const suggested = offers.filter((module) => module.recommended || module.key === params.module || module.status === "trial");
   const others = offers.filter((module) => !suggested.includes(module));
-  const bundle = suggested.filter((module) => module.status === "locked");
-  const bundleCents = bundle.reduce((sum, module) => sum + module.priceCents, 0);
   const plan = manifest.data?.plan;
+  const stripeManaged = owned.some((module) => module.billingSource === "STRIPE");
+  const storeManaged = owned.some((module) => module.billingSource === "APPLE" || module.billingSource === "GOOGLE");
+
+  function run(action: Promise<unknown>) {
+    setMessage("");
+    action.catch((caught: Error) => setMessage(caught.message));
+  }
+
+  function restorePurchases() {
+    setMessage("");
+    restore.mutate(undefined, {
+      onSuccess: ({ restored }) => setMessage(restored ? `Abbonamenti ripristinati: ${restored}.` : `Nessun abbonamento attivo trovato su ${STORE_NAME}.`),
+      onError: (caught: Error) => setMessage(caught.message),
+    });
+  }
 
   return (
     <Screen onBack={() => router.back()}>
@@ -129,20 +115,20 @@ export default function StoreScreen() {
             ? `${[plan.paidModules ? `${plan.paidModules} moduli` : null, plan.seats.extra ? `${plan.seats.extra} ${plan.seats.extra === 1 ? "utente extra" : "utenti extra"}` : null].filter(Boolean).join(" · ")} · ${monthly(plan.monthlyCents)}`
             : "Gratis, per sempre. 3 utenti inclusi. Aggiungi solo quello che usi."}
         </Text>
-        {canBuy && plan && (plan.paidModules > 0 || plan.seats.extra > 0) ? (
-          <Button
-            tone="secondary"
-            label="Gestisci abbonamento"
-            loading={portal.isPending}
-            onPress={() => {
-              setPortalError("");
-              portal.mutate(undefined, { onError: (error: Error) => setPortalError(error.message) });
-            }}
-          />
+        {canBuy && IN_APP_PURCHASES && storeManaged ? (
+          <Button tone="secondary" label={`Gestisci abbonamenti su ${STORE_NAME}`} onPress={() => run(manageSubscriptions())} />
         ) : null}
-        {portalError ? (
-          <Text variant="caption" style={{ color: theme.colors.danger }}>
-            {portalError}
+        {canBuy && !IN_APP_PURCHASES && (stripeManaged || (plan?.seats.extra ?? 0) > 0) ? (
+          <Button tone="secondary" label="Gestisci abbonamento" loading={portal.isPending} onPress={() => run(portal.mutateAsync())} />
+        ) : null}
+        {canBuy && IN_APP_PURCHASES && stripeManaged ? (
+          <Text variant="caption" muted>
+            Alcuni moduli sono stati attivati dal sito web: li gestisci da lì.
+          </Text>
+        ) : null}
+        {message ? (
+          <Text variant="caption" muted>
+            {message}
           </Text>
         ) : null}
       </View>
@@ -151,7 +137,7 @@ export default function StoreScreen() {
         <LinearGradient colors={[theme.colors.accentSoft, "transparent"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <Ionicons name="sparkles" size={18} color={theme.colors.accent} />
-          <Text variant="heading">Incluso nel Base</Text>
+          <Text variant="heading">Incluso nel tuo piano</Text>
         </View>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {[...included, ...owned].map((module) => (
@@ -170,26 +156,19 @@ export default function StoreScreen() {
       {offers.length ? null : <Text muted>Hai già tutti i moduli.</Text>}
       {suggested.length ? <Text variant="title">Consigliati per te</Text> : null}
       {suggested.map((module) => (
-        <Offer key={module.key} module={module} highlighted={module.key === params.module} canBuy={canBuy} />
+        <Offer key={module.key} module={module} highlighted={module.key === params.module} />
       ))}
-
-      {canBuy && bundle.length > 1 ? (
-        <Card style={{ gap: 10 }}>
-          <Text variant="heading">Tutti i consigliati</Text>
-          <Text muted>
-            {bundle.length} moduli · {monthly(bundleCents)}
-          </Text>
-          <Button label="Sblocca tutto" loading={checkout.isPending} onPress={() => checkout.mutate(bundle.map((module) => module.key))} />
-        </Card>
-      ) : null}
 
       {others.length ? <Text variant="title">Altri moduli</Text> : null}
       {others.map((module) => (
-        <Offer key={module.key} module={module} highlighted={false} canBuy={canBuy} />
+        <Offer key={module.key} module={module} highlighted={false} />
       ))}
 
+      {canBuy && IN_APP_PURCHASES ? (
+        <Button tone="ghost" label="Ripristina acquisti" loading={restore.isPending} onPress={restorePurchases} />
+      ) : null}
       <Text variant="caption" muted style={{ textAlign: "center" }}>
-        Pagamento sicuro sul web. Disdici quando vuoi.
+        {IN_APP_PURCHASES ? `Pagamento sicuro con ${STORE_NAME}. Disdici quando vuoi.` : "Pagamento sicuro con Stripe. Disdici quando vuoi."}
       </Text>
     </Screen>
   );

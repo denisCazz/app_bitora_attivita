@@ -9,6 +9,7 @@ import {
   scheduleSchema,
   signatureSchema,
   slotMinutes,
+  stockLevel,
   workOrderSchema,
   type Terminology,
 } from "@rapportini/shared";
@@ -19,7 +20,7 @@ import { categoryOfTenant } from "../lib/catalog";
 import { assertCustomFields } from "../lib/fields";
 import { renderWorkOrderPdf } from "../lib/pdf";
 import { prisma, tenantDb } from "../lib/prisma";
-import { saveUpload } from "../lib/storage";
+import { removeUpload, saveUpload } from "../lib/storage";
 import { tenantId } from "../plugins/auth";
 import { moduleGuard, permit } from "../plugins/guards";
 
@@ -46,14 +47,18 @@ export async function coreRoutes(app: FastifyInstance) {
   app.get("/dashboard", { preHandler: [app.requireTenant, permit("dashboard.view"), moduleGuard("dashboard")] }, async (request) => {
     const id = tenantId(request);
     const db = tenantDb(id);
-    const [openWorkOrders, dueSoon, openOrders, balances] = await Promise.all([
+    const [openWorkOrders, dueSoon, openOrders, balances, ingredientBalances, ingredients] = await Promise.all([
       db.workOrder.count({ where: { status: { in: ["DRAFT", "SCHEDULED", "IN_PROGRESS"] } } }),
       db.schedule.findMany({ where: { dueAt: { lte: new Date(Date.now() + 14 * 86400000) } }, orderBy: { dueAt: "asc" }, take: 6, include: { asset: true } }),
       db.order.count({ where: { status: { in: ["OPEN", "SENT", "PARTIAL"] } } }),
       db.stockMovement.groupBy({ by: ["partId"], where: { partId: { not: null } }, _sum: { quantity: true } }),
+      db.stockMovement.groupBy({ by: ["ingredientId"], where: { ingredientId: { not: null } }, _sum: { quantity: true } }),
+      db.ingredient.findMany({ select: { id: true, minQuantity: true } }),
     ]);
     const lowStock = balances.filter((row) => row.partId && num(row._sum.quantity) <= 2).length;
-    return { openWorkOrders, dueSoon, openOrders, lowStock };
+    const onHand = new Map(ingredientBalances.map((row) => [row.ingredientId, num(row._sum.quantity)]));
+    const lowInventory = ingredients.filter((item) => stockLevel(onHand.get(item.id) ?? 0, item.minQuantity == null ? null : num(item.minQuantity)) !== "ok").length;
+    return { openWorkOrders, dueSoon, openOrders, lowStock, lowInventory };
   });
 
   app.get("/customers", { preHandler: [app.requireTenant, permit("customers.read")] }, async (request) => {
@@ -162,9 +167,9 @@ export async function coreRoutes(app: FastifyInstance) {
 
   const orderInclude = {
     customer: true,
-    asset: true,
+    asset: { include: { location: true } },
     assignee: { select: { id: true, name: true } },
-    attachments: true,
+    attachments: { orderBy: { createdAt: "asc" as const } },
     checklistRuns: true,
     stockMovements: { include: { part: true, location: true }, orderBy: { createdAt: "desc" as const } },
   } as const;
@@ -173,7 +178,7 @@ export async function coreRoutes(app: FastifyInstance) {
     const status = (request.query as { status?: "DRAFT" | "SCHEDULED" | "IN_PROGRESS" | "DONE" | "CANCELLED" }).status;
     return tenantDb(tenantId(request)).workOrder.findMany({
       where: status ? { status } : undefined,
-      include: { customer: true, asset: true },
+      include: { customer: true, asset: { include: { location: true } }, assignee: { select: { id: true, name: true } } },
       orderBy: { scheduledAt: "asc" },
       take: 100,
     });
@@ -224,9 +229,12 @@ export async function coreRoutes(app: FastifyInstance) {
     const body = parseBody(signatureSchema, request.body);
     const db = tenantDb(tenantId(request));
     await must(db.workOrder.findFirst({ where: { id: idOf(request) } }), "Intervento");
+    const technician = body.role === "TECHNICIAN";
     return db.workOrder.update({
       where: { id: idOf(request) },
-      data: { signatureData: body.signatureData, signedBy: body.signedBy, status: "DONE", completedAt: new Date() },
+      data: technician
+        ? { technicianSignature: body.signatureData, technicianSignedBy: body.signedBy, technicianSignedAt: new Date() }
+        : { signatureData: body.signatureData, signedBy: body.signedBy, status: "DONE", completedAt: new Date() },
     });
   });
 
@@ -294,11 +302,25 @@ export async function coreRoutes(app: FastifyInstance) {
     const file = await request.file();
     if (!file) throw new HttpError(400, "File mancante");
     const workOrderField = file.fields.workOrderId as { value?: string } | undefined;
+    const workOrderId = workOrderField?.value || null;
     const id = tenantId(request);
-    const url = await saveUpload(file.filename, file.mimetype, await file.toBuffer());
-    return tenantDb(id).attachment.create({
-      data: { tenantId: id, workOrderId: workOrderField?.value || null, fileName: file.filename, mimeType: file.mimetype, url },
+    const db = tenantDb(id);
+    if (workOrderId) await must(db.workOrder.findFirst({ where: { id: workOrderId }, select: { id: true } }), "Intervento");
+    const data = await file.toBuffer();
+    if (!data.length) throw new HttpError(400, "Il file è vuoto");
+    const mimeType = file.mimetype === "application/octet-stream" && /\.(jpe?g)$/i.test(file.filename) ? "image/jpeg" : file.mimetype;
+    const url = await saveUpload(file.filename, mimeType, data);
+    return db.attachment.create({
+      data: { tenantId: id, workOrderId, fileName: file.filename, mimeType, url },
     });
+  });
+
+  app.delete("/attachments/:id", { preHandler: [app.requireTenant, permit("work_orders.write")] }, async (request) => {
+    const db = tenantDb(tenantId(request));
+    const found = await must(db.attachment.findFirst({ where: { id: idOf(request) } }), "Allegato");
+    await db.attachment.delete({ where: { id: found.id } });
+    await removeUpload(found.url).catch(() => undefined);
+    return { ok: true };
   });
 
   app.get("/checklist-templates", { preHandler: [app.requireTenant, permit("checklists.read"), moduleGuard("checklists")] }, async (request) => {
