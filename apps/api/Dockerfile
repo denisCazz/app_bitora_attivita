@@ -12,7 +12,9 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/ui/package.json packages/ui/
 COPY apps/api/prisma apps/api/prisma
 
-RUN pnpm install --frozen-lockfile --filter "@rapportini/api..." && pnpm store prune
+# .npmrc hoists for Expo, which would pull the whole mobile app into this image.
+RUN pnpm install --frozen-lockfile --filter "@rapportini/api..." --config.node-linker=isolated \
+  && pnpm store prune
 
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
