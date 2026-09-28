@@ -2,6 +2,7 @@ import { Queue, Worker } from "bullmq";
 import IORedis from "ioredis";
 import { num } from "../errors";
 import { env } from "../env";
+import { emailDueReminders } from "./customer-reminders";
 import { prisma } from "./prisma";
 
 const HOUR = 60 * 60 * 1000;
@@ -382,6 +383,7 @@ export async function runReminders() {
       collect("Comande", () => remindWaitingOrders(now, directory)),
       collect("Prove", () => remindTrials(now, directory)),
     ]);
+    await collect("Promemoria ai clienti", () => emailDueReminders(now));
     const alerts = [...(schedules?.alerts ?? []), ...rest.flatMap((batch) => batch ?? [])];
     const sent = await deliver(alerts, now);
     if (schedules?.ids.length) {

@@ -8,7 +8,7 @@ import { tenantId } from "../plugins/auth";
 import { permit } from "../plugins/guards";
 
 const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
-const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+const LOGO_MAX_BYTES = 6 * 1024 * 1024;
 
 function idOf(request: { params: unknown }): string {
   return (request.params as { id: string }).id;
@@ -115,7 +115,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     if (!LOGO_TYPES.has(mimeType)) throw new HttpError(400, "Il logo deve essere un'immagine PNG, JPG o WebP");
     const data = await file.toBuffer();
     if (!data.length) throw new HttpError(400, "Il file è vuoto");
-    if (data.length > LOGO_MAX_BYTES) throw new HttpError(413, "Il logo è troppo grande: massimo 2 MB");
+    if (data.length > LOGO_MAX_BYTES) throw new HttpError(413, "Il logo è troppo grande: massimo 6 MB");
     const id = tenantId(request);
     const tenant = await must(prisma.tenant.findUnique({ where: { id } }), "Negozio");
     const previous = (tenant.branding as { logoUrl?: string | null }).logoUrl;

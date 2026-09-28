@@ -31,6 +31,14 @@ import { z, type ZodTypeAny } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+type CustomFieldEntity = "CUSTOMER" | "ASSET" | "WORK_ORDER" | "PRODUCT";
+
+/** A field the app form asks for: the assistant must collect it from the user or have it explicitly skipped. */
+export interface Ask {
+  field: string;
+  label: string;
+  module?: ModuleKey;
+}
 
 export interface Action {
   name: string;
@@ -43,6 +51,9 @@ export interface Action {
   query?: z.AnyZodObject;
   body?: ZodTypeAny;
   write: boolean;
+  asks?: Ask[];
+  entity?: CustomFieldEntity;
+  slot?: "schedule" | "work_order";
 }
 
 const q = z.object({ q: z.string().optional().describe("Testo da cercare") });
@@ -61,24 +72,55 @@ function write(name: string, title: string, description: string, method: Method,
   return { name, title, description, method, path, permission, module, body, write: true };
 }
 
+function asking(action: Action, extra: Pick<Action, "asks" | "entity" | "slot">): Action {
+  return { ...action, ...extra };
+}
+
 const ACTIONS: Action[] = [
   read("get_dashboard", "Riepilogo", "Numeri principali: interventi aperti, scadenze vicine, comande aperte, ricambi sotto scorta.", "/dashboard", "dashboard.view", "dashboard"),
 
   read("search_customers", "Cerca clienti", "Cerca clienti per nome (max 100). Senza q elenca tutti.", "/customers", "customers.read", undefined, q),
   read("get_customer", "Scheda cliente", "Dettaglio cliente con impianti e ultimi interventi.", "/customers/:id", "customers.read"),
-  write("create_customer", "Nuovo cliente", "Crea un cliente.", "POST", "/customers", "customers.write", undefined, customerSchema),
+  asking(write("create_customer", "Nuovo cliente", "Crea un cliente.", "POST", "/customers", "customers.write", undefined, customerSchema), {
+    entity: "CUSTOMER",
+    asks: [
+      { field: "phone", label: "telefono" },
+      { field: "email", label: "email" },
+      { field: "address", label: "indirizzo" },
+      { field: "city", label: "città" },
+    ],
+  }),
   write("update_customer", "Modifica cliente", "Aggiorna i campi di un cliente.", "PATCH", "/customers/:id", "customers.write", undefined, customerSchema.partial()),
   write("delete_customer", "Elimina cliente", "Elimina un cliente senza dati collegati.", "DELETE", "/customers/:id", "customers.write"),
 
   read("search_assets", "Cerca impianti", "Cerca impianti/apparecchi per nome, modello o matricola, opzionalmente di un cliente.", "/assets", "assets.read", "assets", q.extend({ customerId: z.string().optional() })),
   read("get_asset", "Scheda impianto", "Dettaglio impianto con interventi e scadenze.", "/assets/:id", "assets.read", "assets"),
-  write("create_asset", "Nuovo impianto", "Registra un impianto/apparecchio, di solito collegato a un cliente.", "POST", "/assets", "assets.write", "assets", assetSchema),
+  asking(write("create_asset", "Nuovo impianto", "Registra un impianto/apparecchio, di solito collegato a un cliente.", "POST", "/assets", "assets.write", "assets", assetSchema), {
+    entity: "ASSET",
+    asks: [
+      { field: "type", label: "tipo" },
+      { field: "brand", label: "marca" },
+      { field: "model", label: "modello" },
+      { field: "serialNumber", label: "matricola" },
+    ],
+  }),
   write("update_asset", "Modifica impianto", "Aggiorna un impianto.", "PATCH", "/assets/:id", "assets.write", "assets", assetSchema.partial()),
 
   read("list_work_orders", "Interventi", "Elenca interventi, filtrabili per stato.", "/work-orders", "work_orders.read", "work_orders", z.object({ status: z.enum(["DRAFT", "SCHEDULED", "IN_PROGRESS", "DONE", "CANCELLED"]).optional() })),
   read("get_work_order", "Dettaglio intervento", "Dettaglio intervento con cliente, impianto, ricambi e checklist.", "/work-orders/:id", "work_orders.read", "work_orders"),
-  write("create_work_order", "Nuovo intervento", "Crea/pianifica un intervento. scheduledAt in ISO 8601 con fuso orario.", "POST", "/work-orders", "work_orders.write", "work_orders", workOrderSchema),
-  write("update_work_order", "Modifica intervento", "Aggiorna un intervento (stato, data, tecnico, descrizione).", "PATCH", "/work-orders/:id", "work_orders.write", "work_orders", workOrderSchema.partial()),
+  asking(write("create_work_order", "Nuovo intervento", "Crea/pianifica un intervento. scheduledAt in ISO 8601 con fuso orario.", "POST", "/work-orders", "work_orders.write", "work_orders", workOrderSchema), {
+    entity: "WORK_ORDER",
+    slot: "work_order",
+    asks: [
+      { field: "customerId", label: "cliente" },
+      { field: "scheduledAt", label: "data e ora" },
+      { field: "durationMinutes", label: "durata" },
+      { field: "assetId", label: "impianto", module: "assets" },
+    ],
+  }),
+  asking(write("update_work_order", "Modifica intervento", "Aggiorna un intervento (stato, data, tecnico, descrizione).", "PATCH", "/work-orders/:id", "work_orders.write", "work_orders", workOrderSchema.partial()), {
+    slot: "work_order",
+  }),
   write(
     "add_part_to_work_order",
     "Scarica ricambio su intervento",
@@ -107,17 +149,27 @@ const ACTIONS: Action[] = [
     "calendar",
     z.object({ from: z.string().describe("Inizio intervallo ISO 8601"), to: z.string().describe("Fine intervallo ISO 8601") }),
   ),
-  write(
-    "create_schedule",
-    "Nuovo appuntamento",
-    "Crea un appuntamento o una scadenza. kind deve essere uno dei tipi del negozio. dueAt ISO 8601. durationMinutes solo se l'utente indica una durata diversa da quella predefinita del tipo. La risposta contiene overlaps: appuntamenti che si sovrappongono (è solo un avviso).",
-    "POST",
-    "/schedules",
-    "schedules.write",
-    "calendar",
-    scheduleSchema,
+  asking(
+    write(
+      "create_schedule",
+      "Nuovo appuntamento",
+      "Crea un appuntamento o una scadenza. kind deve essere uno dei tipi del negozio. dueAt ISO 8601. durationMinutes è la durata dello slot: se l'utente non la dice, proponi quella predefinita del tipo e fattela confermare. Prima della conferma il server verifica lo slot e rifiuta le sovrapposizioni non accettate dall'utente.",
+      "POST",
+      "/schedules",
+      "schedules.write",
+      "calendar",
+      scheduleSchema,
+    ),
+    {
+      slot: "schedule",
+      asks: [
+        { field: "dueAt", label: "data e ora" },
+        { field: "durationMinutes", label: "durata" },
+        { field: "assetId", label: "postazione o attrezzatura", module: "assets" },
+      ],
+    },
   ),
-  write("update_schedule", "Modifica scadenza", "Aggiorna una scadenza.", "PATCH", "/schedules/:id", "schedules.write", "calendar", scheduleSchema.partial()),
+  asking(write("update_schedule", "Modifica scadenza", "Aggiorna una scadenza.", "PATCH", "/schedules/:id", "schedules.write", "calendar", scheduleSchema.partial()), { slot: "schedule" }),
   write("delete_schedule", "Elimina scadenza", "Elimina una scadenza.", "DELETE", "/schedules/:id", "schedules.write", "calendar"),
 
   read("search_spare_parts", "Cerca ricambi", "Cerca ricambi per testo o modello compatibile.", "/spare-parts", "spare_parts.read", "spare_parts", q.extend({ model: z.string().optional() })),
@@ -136,7 +188,7 @@ const ACTIONS: Action[] = [
 
   read("list_menu", "Menu", "Elenca tutte le voci del menu con prezzi, disponibilità e varianti.", "/menu-items", "menu.read", "menu"),
   read("list_modifiers", "Varianti", "Elenca le varianti (aggiunte/modifiche) disponibili.", "/modifiers", "menu.read", "menu"),
-  write("create_menu_item", "Nuova voce di menu", "Aggiunge una voce al menu.", "POST", "/menu-items", "menu.write", "menu", menuItemSchema),
+  asking(write("create_menu_item", "Nuova voce di menu", "Aggiunge una voce al menu.", "POST", "/menu-items", "menu.write", "menu", menuItemSchema), { entity: "PRODUCT" }),
   write("update_menu_item", "Modifica voce di menu", "Aggiorna prezzo, nome, disponibilità o varianti di una voce.", "PATCH", "/menu-items/:id", "menu.write", "menu", menuItemSchema.partial()),
   write("delete_menu_item", "Elimina voce di menu", "Elimina una voce dal menu.", "DELETE", "/menu-items/:id", "menu.write", "menu"),
   write("create_modifier", "Nuova variante", "Crea una variante con eventuale sovrapprezzo.", "POST", "/modifiers", "menu.write", "menu", modifierSchema),
@@ -200,7 +252,17 @@ const ACTIONS: Action[] = [
 
   read("list_suppliers", "Fornitori", "Elenca i fornitori con ordini aperti e ultimi ordini. q cerca nome, città, telefono o partita IVA.", "/suppliers", "suppliers.read", "suppliers", q),
   read("get_supplier", "Scheda fornitore", "Anagrafica, articoli abituali, ordini d'acquisto e spese collegate.", "/suppliers/:id", "suppliers.read", "suppliers"),
-  write("create_supplier", "Nuovo fornitore", "Crea un fornitore con contatti, partita IVA e condizioni di pagamento.", "POST", "/suppliers", "suppliers.write", "suppliers", supplierSchema),
+  asking(write("create_supplier", "Nuovo fornitore", "Crea un fornitore con contatti, partita IVA e condizioni di pagamento.", "POST", "/suppliers", "suppliers.write", "suppliers", supplierSchema), {
+    asks: [
+      { field: "vat", label: "partita IVA" },
+      { field: "contactName", label: "referente" },
+      { field: "phone", label: "telefono" },
+      { field: "email", label: "email" },
+      { field: "address", label: "indirizzo" },
+      { field: "city", label: "città" },
+      { field: "paymentTerms", label: "condizioni di pagamento" },
+    ],
+  }),
   write("update_supplier", "Modifica fornitore", "Aggiorna l'anagrafica di un fornitore.", "PATCH", "/suppliers/:id", "suppliers.write", "suppliers", supplierSchema.partial()),
   write("delete_supplier", "Elimina fornitore", "Elimina un fornitore che non ha ordini collegati.", "DELETE", "/suppliers/:id", "suppliers.write", "suppliers"),
   write("create_purchase_order", "Ordine a fornitore", "Crea un ordine d'acquisto. Ogni riga può indicare l'ingrediente, così la ricezione carica la giacenza.", "POST", "/purchase-orders", "suppliers.write", "suppliers", purchaseOrderSchema),
@@ -257,14 +319,26 @@ const ACTIONS: Action[] = [
   read("list_team", "Squadra", "Elenca le persone del negozio (per assegnare interventi o turni).", "/team", "team.manage"),
 ];
 
+function usable(manifest: Manifest, key: ModuleKey | undefined): boolean {
+  if (!key) return true;
+  const module = manifest.modules.find((row) => row.key === key);
+  return Boolean(module && isUsable(module.status));
+}
+
 export function availableActions(manifest: Manifest): Action[] {
   const permissions = manifest.role.permissions;
-  return ACTIONS.filter((action) => {
-    if (!permissions.includes(action.permission)) return false;
-    if (!action.module) return true;
-    const module = manifest.modules.find((row) => row.key === action.module);
-    return Boolean(module && isUsable(module.status));
-  });
+  return ACTIONS.filter((action) => permissions.includes(action.permission) && usable(manifest, action.module));
+}
+
+/** Every field the matching app form would ask for, including the shop's custom fields. */
+export function asksFor(action: Action, manifest: Manifest): Ask[] {
+  const terms = manifest.tenant.terminology;
+  const named: Record<string, string | undefined> = { assetId: terms.asset, customerId: terms.customer };
+  const fixed = (action.asks ?? []).filter((ask) => usable(manifest, ask.module)).map((ask) => (named[ask.field] ? { ...ask, label: named[ask.field]!.toLowerCase() } : ask));
+  const custom = action.entity
+    ? manifest.customFields.filter((field) => field.entity === action.entity).map((field) => ({ field: `customFields.${field.key}`, label: field.label.toLowerCase() }))
+    : [];
+  return [...fixed, ...custom];
 }
 
 export function pathParams(action: Action): string[] {
@@ -276,8 +350,9 @@ function jsonSchema(schema: ZodTypeAny): Record<string, unknown> {
   return rest;
 }
 
-export function toolDefinition(action: Action) {
+export function toolDefinition(action: Action, manifest: Manifest) {
   const properties: Record<string, unknown> = {};
+  const asks = asksFor(action, manifest);
   const required: string[] = [];
   for (const param of pathParams(action)) {
     properties[param] = { type: "string", description: "ID ottenuto da una ricerca" };
@@ -292,11 +367,22 @@ export function toolDefinition(action: Action) {
     properties.summary = { type: "string", description: "Riepilogo in italiano, breve e concreto, di cosa farai (mostrato all'utente per la conferma)" };
     required.push("summary");
   }
+  if (asks.length) {
+    properties.skipped = {
+      type: "array",
+      items: { type: "string", enum: asks.map((ask) => ask.field) },
+      description: "Campi per cui l'utente ha risposto no, nessuno, non so o salta: restano vuoti",
+    };
+  }
+  if (action.slot) {
+    properties.overlapOk = { type: "boolean", description: "true solo se l'utente, avvisato che l'orario si sovrappone ad altri appuntamenti, vuole procedere lo stesso" };
+  }
+  const askText = asks.length ? ` Prima di chiamarla chiedi all'utente, in un'unica domanda, i dati che non ti ha ancora dato: ${asks.map((ask) => ask.label).join(", ")}.` : "";
   return {
     type: "function" as const,
     function: {
       name: action.name,
-      description: `${action.description}${action.write ? " Modifica i dati: l'app chiederà conferma all'utente." : ""}`,
+      description: `${action.description}${askText}${action.write ? " Modifica i dati: l'app chiederà conferma all'utente." : ""}`,
       parameters: { type: "object", properties, required },
     },
   };

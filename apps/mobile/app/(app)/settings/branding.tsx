@@ -9,9 +9,11 @@ import { View } from "react-native";
 import { Button, Card, Input, Screen, Text, useTheme } from "@rapportini/ui";
 import { http, mediaUrl, upload } from "../../../src/api/client";
 import { queryClient } from "../../../src/api/query";
+import { ColorPicker } from "../../../src/components/ColorPicker";
 import { useManifest } from "../../../src/session";
 
-const COLORS = ["#E25B2A", "#1C6B56", "#175CD3", "#7A4E2D", "#B42318"];
+const DEFAULT_ACCENT = "#E25B2A";
+const LOGO_MAX_BYTES = 6 * 1024 * 1024;
 const EXTENSION: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
 
 export default function BrandingScreen() {
@@ -20,7 +22,7 @@ export default function BrandingScreen() {
   const theme = useTheme();
   const terms = manifest.data?.tenant.terminology;
   const logoUrl = manifest.data?.tenant.branding.logoUrl ?? null;
-  const [accent, setAccent] = useState(manifest.data?.tenant.branding.accent ?? COLORS[0]!);
+  const [accent, setAccent] = useState(manifest.data?.tenant.branding.accent ?? DEFAULT_ACCENT);
   const [workOrder, setWorkOrder] = useState(terms?.workOrder ?? "");
   const [workOrders, setWorkOrders] = useState(terms?.workOrders ?? "");
   const [asset, setAsset] = useState(terms?.asset ?? "");
@@ -34,9 +36,16 @@ export default function BrandingScreen() {
   });
   const uploadLogo = useMutation({
     mutationFn: async () => {
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.9 });
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.7,
+        // HEIC photos come back as JPEG and iCloud-only photos get downloaded instead of failing.
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+        shouldDownloadFromNetwork: true,
+      });
       if (result.canceled || !result.assets[0]) return;
       const picked = result.assets[0];
+      if (picked.fileSize && picked.fileSize > LOGO_MAX_BYTES) throw new Error("Immagine troppo grande: scegline una sotto i 6 MB.");
       const type = picked.mimeType && EXTENSION[picked.mimeType] ? picked.mimeType : "image/jpeg";
       await upload("/settings/logo", { uri: picked.uri, name: `logo-${Date.now()}.${EXTENSION[type]}`, type, blob: picked.file });
       await queryClient.invalidateQueries({ queryKey: ["manifest"] });
@@ -76,7 +85,7 @@ export default function BrandingScreen() {
             )}
           </View>
           <Text variant="caption" muted style={{ flex: 1 }}>
-            Compare nella home e in testa ai rapportini PDF. PNG o JPG, al massimo 2 MB.
+            Compare nella home e in testa ai rapportini PDF. PNG o JPG, al massimo 6 MB.
           </Text>
         </View>
         <Button tone="secondary" label={logoUrl ? "Cambia logo" : "Carica logo"} loading={uploadLogo.isPending} onPress={() => uploadLogo.mutate()} />
@@ -84,9 +93,13 @@ export default function BrandingScreen() {
         {uploadLogo.error || removeLogo.error ? <Text style={{ color: theme.colors.danger }}>{(uploadLogo.error ?? removeLogo.error)?.message}</Text> : null}
       </Card>
 
-      {COLORS.map((color) => (
-        <Button key={color} label={color} tone={accent === color ? "primary" : "secondary"} style={{ backgroundColor: accent === color ? color : theme.colors.paperRaised }} onPress={() => setAccent(color)} />
-      ))}
+      <Card style={{ gap: 12 }}>
+        <Text variant="heading">Colore dell'app</Text>
+        <Text variant="caption" muted>
+          Scegli una tinta o regola tonalità e luminosità. Tocca Salva per applicarlo a tutti.
+        </Text>
+        <ColorPicker value={accent} onChange={setAccent} />
+      </Card>
       <Input label="Singolare intervento" value={workOrder} onChangeText={setWorkOrder} />
       <Input label="Plurale interventi" value={workOrders} onChangeText={setWorkOrders} />
       <Input label="Singolare impianto" value={asset} onChangeText={setAsset} />

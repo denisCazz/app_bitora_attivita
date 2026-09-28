@@ -49,7 +49,8 @@ interface Team {
   seats: TeamSeat;
   members: TeamMember[];
   invites: TeamInvite[];
-  canManage: boolean;
+  /** Missing on servers that predate team management. */
+  canManage?: boolean;
 }
 
 function message(error: unknown) {
@@ -173,7 +174,9 @@ export default function TeamScreen() {
 
         {data && !manage ? (
           <Text variant="caption" muted>
-            Solo il titolare del negozio aggiunge, modifica o toglie le persone.
+            {data.canManage === undefined
+              ? "Il server non è aggiornato: per aggiungere dipendenti aggiorna il server e riapri questa pagina."
+              : "Solo il titolare del negozio aggiunge, modifica o toglie le persone."}
           </Text>
         ) : null}
 

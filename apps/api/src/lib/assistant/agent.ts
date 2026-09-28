@@ -2,6 +2,7 @@ import { DEFAULT_SLOT_MINUTES, slotMinutes, type Manifest } from "@rapportini/sh
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { availableActions, pathParams, toolDefinition, type Action } from "./actions";
 import { complete, type ChatMessage, type ToolCall } from "./openai";
+import { preflight } from "./preflight";
 
 const MAX_STEPS = 12;
 const MAX_WRITES = 12;
@@ -123,13 +124,17 @@ function systemPrompt(manifest: Manifest, actions: Action[]): string {
     "- Prima di creare qualcosa cerca se esiste già (cliente, impianto, tavolo, voce di menu). Non inventare mai ID: usa quelli restituiti dalle ricerche.",
     "- Voci di comanda: aggiungi solo voci presenti nel menu (menuItemId). Se una voce non c'è o non è disponibile, fermati per quella voce, dillo e proponi le voci simili; non aggiungerla come testo libero a meno che l'utente lo chieda esplicitamente.",
     "- Le voci inviate partono subito verso il loro reparto (cucina, banco o altro). Per una comanda con più voci usa una sola send_order con tutte le righe in lines.",
-    "- Se una richiesta è ambigua (due clienti con lo stesso nome, più piatti simili) chiedi quale. Se mancano dati indispensabili (es. orario dell'intervento) chiedili tutti insieme in un'unica domanda.",
-    "- Dati non indispensabili non chiederli: usa valori sensati (es. comanda con 1 coperto) e dillo nel riepilogo.",
-    "- Quando hai tutto, chiama direttamente le azioni di modifica: l'app mostra all'utente una scheda di conferma, quindi non chiedere \"confermi?\" a parole.",
+    "- Se una richiesta è ambigua (due clienti con lo stesso nome, più piatti simili) chiedi quale.",
+    "- Non inventare mai dati: nomi, telefoni, email, indirizzi, date, orari e durate arrivano solo dall'utente o dalle ricerche.",
+    "- Prima di creare qualcosa raccogli tutti i dati che chiederebbe il modulo dell'app (li trovi nella descrizione di ogni azione). Chiedi quelli mancanti tutti insieme, in un'unica domanda breve. Se l'utente dice che un dato non c'è o di saltarlo, mettilo in skipped.",
+    "- Solo per le comande puoi usare valori sensati senza chiedere (es. 1 coperto) e dirlo nel riepilogo.",
+    "- Se per fare una cosa serve prima un'altra (es. appuntamento per un cliente che non esiste), chiedi subito anche i dati della seconda, così l'utente risponde una volta sola.",
+    "- Quando hai tutto, chiama direttamente le azioni di modifica: l'app mostra all'utente una scheda di conferma, quindi non chiedere \"confermi?\" a parole. Non scrivere mai \"procedo\" senza chiamare le azioni nello stesso messaggio.",
     "- Nel summary della prima modifica descrivi TUTTO quello che farai in questo turno (es. \"Apro la comanda al tavolo 2 e aggiungo 1 Coca-Cola\"): dopo la conferma le modifiche successive dello stesso turno partono senza chiedere di nuovo.",
     "- Appuntamenti e interventi occupano solo il loro slot: da inizio a inizio + durata (start/end in get_agenda). Un appuntamento alle 20:00 NON occupa la giornata: prima e dopo lo slot l'orario è libero. Non inventare mai orari di fine.",
-    "- Prima di fissare un appuntamento controlla con get_agenda solo lo slot richiesto. Se si sovrappone a un altro sulla stessa postazione, avvisa e proponi l'orario libero più vicino, ma se l'utente vuole comunque procedi: le sovrapposizioni non bloccano mai la creazione.",
-    "- La durata predefinita dipende dal tipo di appuntamento; se l'utente dice una durata (es. \"un'ora e mezza\") passala in durationMinutes.",
+    "- Per un appuntamento servono: per chi o cosa (titolo, di solito col nome del cliente), tipo, giorno e ora, durata e, se ci sono, postazione o attrezzatura. La durata la decide l'utente: se non la dice proponigli quella predefinita del tipo nella stessa domanda.",
+    "- Prima di fissare un appuntamento o un intervento guarda con get_agenda la giornata richiesta e verifica che lo slot intero (inizio + durata) sia libero. Se si sovrappone avvisa, di' con cosa e proponi l'orario libero più vicino. Usa overlapOk true solo se l'utente vuole comunque quell'orario.",
+    "- Il server ricontrolla dati e slot: se un'azione torna con un errore, non riprovare a caso, chiedi all'utente quello che manca.",
     "- Se un'azione restituisce un errore spiegalo all'utente con parole semplici e proponi come rimediare.",
     "- Alla fine riassumi in una o due frasi cosa hai fatto.",
     actions.length ? "" : "Questo utente non ha azioni disponibili: puoi solo rispondere a domande generali sull'app.",
@@ -144,7 +149,7 @@ export async function runAssistant(
 ): Promise<AssistantResult> {
   const actions = availableActions(manifest);
   const byName = new Map(actions.map((action) => [action.name, action]));
-  const tools = actions.map(toolDefinition);
+  const tools = actions.map((action) => toolDefinition(action, manifest));
   const system = systemPrompt(manifest, actions);
   const messages = [...input.messages];
   const done: DoneAction[] = [];
@@ -156,6 +161,8 @@ export async function runAssistant(
     if (!action) return serialize({ ok: false, error: "Azione non disponibile per questo utente" });
     const args = parseArgs(call);
     if (action.write && writes >= MAX_WRITES) return serialize({ ok: false, error: "Troppe modifiche in un solo turno" });
+    const check = await preflight(request, manifest, action, args);
+    if (!check.ok) return serialize({ ok: false, error: check.error });
     const result = await execute(app, request, action, args);
     if (action.write) {
       writes += 1;
@@ -182,10 +189,22 @@ export async function runAssistant(
     if (!calls.length) return { messages, reply: reply.content, pending: [], done };
     const writing = calls.filter((call) => byName.get(call.function.name)?.write);
     if (writing.length && !approved) {
-      const pending = writing.map((call) => {
+      const checks = await Promise.all(writing.map(async (call) => ({ call, check: await preflight(request, manifest, byName.get(call.function.name)!, parseArgs(call)) })));
+      if (checks.some(({ check }) => !check.ok)) {
+        for (const call of calls) {
+          const entry = checks.find((item) => item.call.id === call.id);
+          const content = !entry
+            ? await run(call)
+            : serialize({ ok: false, error: entry.check.ok ? "Non eseguita: prima sistema le altre modifiche di questo turno" : entry.check.error });
+          messages.push({ role: "tool", tool_call_id: call.id, content });
+        }
+        continue;
+      }
+      const pending = checks.map(({ call, check }) => {
         const action = byName.get(call.function.name)!;
         const summary = parseArgs(call).summary;
-        return { id: call.id, title: action.title, summary: typeof summary === "string" && summary.trim() ? summary : action.title };
+        const text = typeof summary === "string" && summary.trim() ? summary.trim() : action.title;
+        return { id: call.id, title: action.title, summary: check.ok && check.note ? `${text}\n${check.note}` : text };
       });
       return { messages, reply: reply.content, pending, done };
     }

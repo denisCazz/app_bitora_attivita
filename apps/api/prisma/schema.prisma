@@ -89,6 +89,11 @@ enum LedgerKind {
   EXPENSE
 }
 
+enum ReminderChannel {
+  EMAIL
+  WHATSAPP
+}
+
 enum WorkPaymentStatus {
   DUE
   PARTIAL
@@ -97,28 +102,47 @@ enum WorkPaymentStatus {
 }
 
 model User {
-  id                String           @id @default(cuid())
-  email             String           @unique
-  name              String
+  id                 String              @id @default(cuid())
+  email              String              @unique
+  name               String
   /// Null for accounts created with Apple or Google.
-  passwordHash      String?
-  appleSub          String?          @unique
+  passwordHash       String?
+  appleSub           String?             @unique
   /// Needed to revoke Sign in with Apple when the account is deleted (App Store rule 5.1.1).
-  appleRefreshToken String?
-  googleSub         String?          @unique
-  activeTenantId    String?
-  platformAdmin     Boolean          @default(false)
-  termsVersion      String?
-  termsAcceptedAt   DateTime?
-  aiConsentAt       DateTime?
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  memberships       Membership[]
-  refreshTokens     RefreshToken[]
-  pushTokens        PushToken[]
-  shifts            Shift[]
-  assignedOrders    WorkOrder[]      @relation("Assignee")
-  payrollPostings   PayrollPosting[]
+  appleRefreshToken  String?
+  googleSub          String?             @unique
+  activeTenantId     String?
+  platformAdmin      Boolean             @default(false)
+  termsVersion       String?
+  termsAcceptedAt    DateTime?
+  aiConsentAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  memberships        Membership[]
+  refreshTokens      RefreshToken[]
+  pushTokens         PushToken[]
+  shifts             Shift[]
+  assignedOrders     WorkOrder[]         @relation("Assignee")
+  payrollPostings    PayrollPosting[]
+  idempotentRequests IdempotentRequest[]
+}
+
+/// Replayable response for a write sent with an Idempotency-Key, so offline retries never apply twice.
+model IdempotentRequest {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key        String
+  method     String
+  path       String
+  /// Null while the first attempt is still running.
+  statusCode Int?
+  response   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, key])
+  @@index([createdAt])
 }
 
 model RefreshToken {
@@ -192,6 +216,7 @@ model Tenant {
   invites                   Invite[]
   notifications             Notification[]
   storePurchases            StorePurchase[]
+  customerReminders         CustomerReminder[]
 
   @@index([categoryId])
   @@index([seatsStripeSubscriptionId])
@@ -419,22 +444,25 @@ model CustomFieldDef {
 }
 
 model Customer {
-  id            String             @id @default(cuid())
-  tenantId      String
-  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name          String
-  phone         String?
-  email         String?
-  address       String?
-  city          String?
-  notes         String?
-  customFields  Json               @default("{}")
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  assets        Asset[]
-  workOrders    WorkOrder[]
-  ledgerEntries LedgerEntry[]
-  payments      WorkOrderPayment[]
+  id               String             @id @default(cuid())
+  tenantId         String
+  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name             String
+  phone            String?
+  email            String?
+  address          String?
+  city             String?
+  notes            String?
+  customFields     Json               @default("{}")
+  /// Set when the customer unsubscribes from maintenance reminders.
+  reminderOptOutAt DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  assets           Asset[]
+  workOrders       WorkOrder[]
+  ledgerEntries    LedgerEntry[]
+  payments         WorkOrderPayment[]
+  reminders        CustomerReminder[]
 
   @@index([tenantId, name])
 }
@@ -475,6 +503,8 @@ model WorkOrder {
   asset               Asset?            @relation(fields: [assetId], references: [id])
   assigneeId          String?
   assignee            User?             @relation("Assignee", fields: [assigneeId], references: [id])
+  scheduleId          String?
+  schedule            Schedule?         @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   title               String
   description         String?
   status              WorkOrderStatus   @default(DRAFT)
@@ -497,6 +527,7 @@ model WorkOrder {
 
   @@index([tenantId, status])
   @@index([tenantId, scheduledAt])
+  @@index([scheduleId])
 }
 
 model ChecklistTemplate {
@@ -564,8 +595,31 @@ model Schedule {
   lastRemindedAt  DateTime?
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
+  workOrders      WorkOrder[]
+  reminders       CustomerReminder[]
 
   @@index([tenantId, dueAt])
+}
+
+/// A reminder sent to the customer for one round of a schedule. `dueAt` pins the round, so the
+/// next year's round can be reminded again.
+model CustomerReminder {
+  id         String          @id @default(cuid())
+  tenantId   String
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  scheduleId String
+  schedule   Schedule        @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  dueAt      DateTime
+  channel    ReminderChannel
+  sentAt     DateTime        @default(now())
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@unique([scheduleId, dueAt, channel])
+  @@index([tenantId, sentAt])
+  @@index([customerId])
 }
 
 model SparePart {

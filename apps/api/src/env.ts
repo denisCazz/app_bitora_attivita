@@ -55,6 +55,11 @@ export const env = {
   redisUrl: process.env.REDIS_URL,
   port: Number(process.env.PORT ?? 3001),
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "http://localhost:3001",
+  resend: {
+    apiKey: process.env.RESEND_API_KEY,
+    /** Address on a domain verified in Resend, e.g. promemoria@bitora.app. The shop name goes in front. */
+    from: process.env.RESEND_FROM,
+  },
   stripeSecretKey: process.env.STRIPE_SECRET_KEY,
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
   billingDemo: process.env.BILLING_DEMO === "true",
@@ -81,7 +86,7 @@ export const env = {
   },
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
-    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+    model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
     transcribeModel: process.env.OPENAI_TRANSCRIBE_MODEL ?? "whisper-1",
     speechModel: process.env.OPENAI_TTS_MODEL ?? "gpt-4o-mini-tts",
     speechVoice: process.env.OPENAI_TTS_VOICE ?? "sage",

@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Button, Card, Input, Pressy, Text, useTheme } from "@rapportini/ui";
-import { http } from "../api/client";
+import { isQueued, outbox } from "../api/client";
 import { queryClient } from "../api/query";
 
 export function FreeChecklist({ workOrderId, onSaved, embedded }: { workOrderId?: string; onSaved?: () => void; embedded?: boolean }) {
@@ -11,15 +11,16 @@ export function FreeChecklist({ workOrderId, onSaved, embedded }: { workOrderId?
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   const [open, setOpen] = useState(!embedded);
+  const answers = () => [{ id: "free", label: title.trim() || "Note", checked: true, note: text.trim() }];
   const save = useMutation({
     mutationFn: () =>
-      http.post("/checklist-runs", {
-        templateId: null,
-        workOrderId: workOrderId ?? null,
-        completed: true,
-        answers: [{ id: "free", label: title.trim() || "Note", checked: true, note: text.trim() }],
-      }),
-    onSuccess: async () => {
+      outbox.post("/checklist-runs", { templateId: null, workOrderId: workOrderId ?? null, completed: true, answers: answers() }, title.trim() || "Nota"),
+    onSuccess: async (result) => {
+      if (isQueued(result) && workOrderId) {
+        queryClient.setQueryData<{ checklistRuns?: Array<{ id: string; answers: unknown[] }> }>(["work-order", workOrderId], (current) =>
+          current ? { ...current, checklistRuns: [...(current.checklistRuns ?? []), { id: result.id, answers: answers() }] } : current,
+        );
+      }
       setTitle("");
       setText("");
       await queryClient.invalidateQueries({ queryKey: ["checklists"] });

@@ -6,6 +6,7 @@ import { Badge, Button, Card, EmptyState, Fab, Input, Screen, Sheet, Text } from
 import { http } from "../../src/api/client";
 import { queryClient } from "../../src/api/query";
 import { Chip } from "../../src/components/Chip";
+import { CustomerReminders } from "../../src/components/CustomerReminders";
 import { DateField } from "../../src/components/DateField";
 import { RecordPicker } from "../../src/components/RecordPicker";
 import { QueryState } from "../../src/components/States";
@@ -135,6 +136,7 @@ export default function CalendarScreen() {
   return (
     <Screen onRefresh={() => query.refetch()}>
       <Text variant="display">Calendario</Text>
+      <CustomerReminders />
       <QueryState isLoading={query.isLoading} error={query.error} refetch={() => query.refetch()}>
         {query.data?.length ? (
           query.data.map((item) => (

@@ -1,11 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import type { ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 import { Badge, Card, Pressy, Screen, Text, useTheme, withAlpha } from "@rapportini/ui";
-import { signOut } from "../../src/account";
+import { confirmSignOut, signOut } from "../../src/account";
 import { http } from "../../src/api/client";
+import { Chevron, Menu, MenuRow } from "../../src/components/Menu";
 import { queryClient } from "../../src/api/query";
 import { useAuth } from "../../src/auth/store";
 import { daysLeft, monthly } from "../../src/billing";
@@ -20,88 +20,6 @@ function initials(name: string) {
 
 function glyph(name: string): keyof typeof Ionicons.glyphMap {
   return name in Ionicons.glyphMap ? (name as keyof typeof Ionicons.glyphMap) : "apps-outline";
-}
-
-function IconWell({ name, tone = "accent" }: { name: keyof typeof Ionicons.glyphMap; tone?: "accent" | "muted" | "danger" }) {
-  const theme = useTheme();
-  const color = tone === "danger" ? theme.colors.danger : tone === "muted" ? theme.colors.inkSoft : theme.colors.accent;
-  return (
-    <View style={{ width: 46, height: 46, borderRadius: 16, borderCurve: "continuous", overflow: "hidden", alignItems: "center", justifyContent: "center" }}>
-      <LinearGradient
-        colors={[withAlpha(color, theme.dark ? 0.34 : 0.2), withAlpha(color, theme.dark ? 0.1 : 0.05)]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-      <Ionicons name={name} size={21} color={color} />
-    </View>
-  );
-}
-
-function Chevron() {
-  const theme = useTheme();
-  return (
-    <View
-      style={{
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: theme.dark ? "rgba(255,255,255,0.06)" : "rgba(18,19,24,0.05)",
-      }}
-    >
-      <Ionicons name="chevron-forward" size={15} color={theme.colors.inkSoft} />
-    </View>
-  );
-}
-
-function Menu({ children }: { children: ReactNode }) {
-  return <Card style={{ padding: 6, gap: 2 }}>{children}</Card>;
-}
-
-function MenuRow({
-  icon,
-  title,
-  subtitle,
-  onPress,
-  trailing,
-  tone = "accent",
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  subtitle?: string;
-  onPress?: () => void;
-  trailing?: ReactNode;
-  tone?: "accent" | "muted" | "danger";
-}) {
-  return (
-    <Pressy
-      accessibilityRole="button"
-      accessibilityLabel={subtitle ? `${title}. ${subtitle}` : title}
-      disabled={!onPress}
-      scaleTo={onPress ? 0.985 : 1}
-      haptic={onPress ? "light" : "none"}
-      onPress={onPress}
-      style={{ borderRadius: 18 }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8, paddingHorizontal: 8, borderRadius: 18 }}>
-        <IconWell name={icon} tone={tone} />
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text variant="heading" numberOfLines={1}>
-            {title}
-          </Text>
-          {subtitle ? (
-            <Text variant="caption" muted numberOfLines={2}>
-              {subtitle}
-            </Text>
-          ) : null}
-        </View>
-        {trailing}
-        {onPress ? <Chevron /> : null}
-      </View>
-    </Pressy>
-  );
 }
 
 export default function MoreScreen() {
@@ -129,6 +47,7 @@ export default function MoreScreen() {
   }
 
   async function logout() {
+    if (!(await confirmSignOut())) return;
     await signOut();
     router.replace("/(auth)/login");
   }

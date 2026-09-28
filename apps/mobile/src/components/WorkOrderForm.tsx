@@ -22,6 +22,8 @@ export interface WorkOrderDraft {
   customerId: string | null;
   assetId: string | null;
   assigneeId: string | null;
+  /** Set when the job books a maintenance round from the reminders list. */
+  scheduleId?: string | null;
   custom: Record<string, string>;
 }
 
@@ -55,15 +57,25 @@ export function workOrderBody(draft: WorkOrderDraft) {
     customerId: draft.customerId,
     assetId: draft.assetId,
     assigneeId: draft.assigneeId,
+    scheduleId: draft.scheduleId,
     customFields: draft.custom,
   };
 }
 
-export function WorkOrderForm({ value, onChange }: { value: WorkOrderDraft; onChange: (next: WorkOrderDraft) => void }) {
+export function WorkOrderForm({
+  value,
+  onChange,
+  names,
+}: {
+  value: WorkOrderDraft;
+  onChange: (next: WorkOrderDraft) => void;
+  /** Names of preselected records, so the pickers can show them before the lists load. */
+  names?: { customer?: string; asset?: string };
+}) {
   const manifest = useManifest();
   const terms = manifest.data?.tenant.terminology;
-  const [customerQ, setCustomerQ] = useState("");
-  const [assetQ, setAssetQ] = useState("");
+  const [customerQ, setCustomerQ] = useState(names?.customer ?? "");
+  const [assetQ, setAssetQ] = useState(names?.asset ?? "");
   const [assigneeQ, setAssigneeQ] = useState("");
   const [creating, setCreating] = useState<"customer" | "asset" | null>(null);
   const [customerDraft, setCustomerDraft] = useState({ name: "", phone: "", email: "", address: "", city: "", notes: "" });

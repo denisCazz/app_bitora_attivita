@@ -8,6 +8,7 @@ export interface AuthContext {
 declare module "fastify" {
   interface FastifyRequest {
     auth?: AuthContext;
+    idempotentRequestId?: string;
   }
   interface FastifyInstance {
     requireUser: (request: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => Promise<void>;

@@ -5,8 +5,8 @@ import { Platform, View } from "react-native";
 import Animated, { FadeInUp, FadeOutUp } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Glass, Text, useTheme } from "@rapportini/ui";
-import { http } from "../../src/api/client";
+import { Glass, Pressy, Text, useTheme } from "@rapportini/ui";
+import { flushQueue, http, refreshOutbox, useOutbox } from "../../src/api/client";
 import { TabBar } from "../../src/components/TabBar";
 import { TermsGate } from "../../src/components/TermsGate";
 import { t } from "../../src/i18n";
@@ -20,9 +20,14 @@ export default function AppLayout() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [offline, setOffline] = useState(false);
+  const pending = useOutbox((state) => state.pending);
+  const sending = useOutbox((state) => state.sending);
+  const refused = useOutbox((state) => state.failed[0]);
+  const dismiss = useOutbox((state) => state.dismiss);
   useStoreSync(can(manifest.data, "settings.manage"));
 
   useEffect(() => {
+    void refreshOutbox().then(() => flushQueue());
     return NetInfo.addEventListener((state) => setOffline(state.isConnected === false));
   }, []);
 
@@ -63,22 +68,40 @@ export default function AppLayout() {
     <View style={{ flex: 1, backgroundColor: theme.colors.paper }}>
       <Tabs
         backBehavior="history"
-        screenOptions={{ headerShown: false, animation: "fade", lazy: true, sceneStyle: { backgroundColor: "transparent" } }}
+        screenOptions={{ headerShown: false, animation: "none", lazy: true, sceneStyle: { backgroundColor: "transparent" } }}
         tabBar={() => <TabBar items={manifest.data?.navigation ?? []} />}
       >
         <Tabs.Screen name="index" />
         <Tabs.Screen name="more" />
       </Tabs>
-      {offline ? (
+      {refused ? (
+        <Animated.View entering={FadeInUp} exiting={FadeOutUp} style={{ position: "absolute", top: insets.top + 6, left: 16, right: 16, alignItems: "center" }}>
+          <Pressy accessibilityRole="button" accessibilityHint="Tocca per chiudere" onPress={() => dismiss(refused.id)}>
+            <Glass liquid glassTint={theme.colors.danger} rounded={18} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 9, paddingHorizontal: 14 }}>
+              <Ionicons name="alert-circle" size={16} color="#fff" />
+              <Text variant="caption" style={{ color: "#fff", fontWeight: "700", flexShrink: 1 }}>
+                {`${refused.label} ${t("outboxRefused")}: ${refused.error}`}
+              </Text>
+              <Ionicons name="close" size={14} color="#fff" />
+            </Glass>
+          </Pressy>
+        </Animated.View>
+      ) : offline || (sending && pending > 0) ? (
         <Animated.View
           entering={FadeInUp}
           exiting={FadeOutUp}
-          style={{ position: "absolute", top: insets.top + 6, alignSelf: "center" }}
+          style={{ position: "absolute", top: insets.top + 6, left: 16, right: 16, alignItems: "center" }}
         >
-          <Glass liquid glassTint={theme.colors.warning} rounded={99} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 7, paddingHorizontal: 14 }}>
-            <Ionicons name="cloud-offline" size={14} color="#fff" />
-            <Text variant="caption" style={{ color: "#fff", fontWeight: "700" }}>
-              {t("offline")}
+          <Glass
+            liquid
+            glassTint={offline ? theme.colors.warning : theme.colors.accent}
+            rounded={99}
+            style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 7, paddingHorizontal: 14 }}
+          >
+            <Ionicons name={offline ? "cloud-offline" : "cloud-upload"} size={14} color="#fff" />
+            <Text variant="caption" style={{ color: "#fff", fontWeight: "700", flexShrink: 1 }}>
+              {offline ? t("offline") : t("outboxSending")}
+              {pending > 0 ? ` · ${pending} ${t("outboxWaiting")}` : ""}
             </Text>
           </Glass>
         </Animated.View>

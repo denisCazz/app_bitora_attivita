@@ -2,10 +2,11 @@ import * as Notifications from "expo-notifications";
 import * as WebBrowser from "expo-web-browser";
 import { useQuery } from "@tanstack/react-query";
 import { create } from "zustand";
-import { api, clearQueue, http } from "./api/client";
+import { api, clearQueue, http, useOutbox } from "./api/client";
 import { persister, queryClient } from "./api/query";
 import { forgetBiometric } from "./auth/biometric";
 import { useAuth } from "./auth/store";
+import { confirmDestructive } from "./confirm";
 
 export interface Account {
   id: string;
@@ -64,6 +65,19 @@ async function devicePushToken(): Promise<string | undefined> {
   if (!settings?.granted) return undefined;
   const token = await Notifications.getExpoPushTokenAsync().catch(() => null);
   return token?.data;
+}
+
+/** Signing out empties the offline queue: ask first when changes are still waiting. */
+export async function confirmSignOut(): Promise<boolean> {
+  const pending = useOutbox.getState().pending;
+  if (!pending) return true;
+  return confirmDestructive(
+    "Uscire senza inviare?",
+    pending === 1
+      ? "Una modifica fatta offline non è ancora arrivata al server e andrà persa."
+      : `${pending} modifiche fatte offline non sono ancora arrivate al server e andranno perse.`,
+    "Esci comunque",
+  );
 }
 
 /** Drops every trace of the session on this device; `revoke` also ends it on the server. */

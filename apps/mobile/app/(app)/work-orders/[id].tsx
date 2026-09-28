@@ -8,7 +8,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import { Alert, Linking, View } from "react-native";
 import { Button, Input, Screen, Sheet, Text, shiftHue, useTheme } from "@rapportini/ui";
-import { API_URL, http, upload } from "../../../src/api/client";
+import { API_URL, discardQueued, http, isQueued, outbox, type Queued } from "../../../src/api/client";
 import { queryClient } from "../../../src/api/query";
 import { confirmDestructive } from "../../../src/confirm";
 import { Chip } from "../../../src/components/Chip";
@@ -59,6 +59,11 @@ interface WorkOrder {
 }
 
 const EXTENSION: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/heic": "heic", "image/webp": "webp" };
+
+/** A photo still in the offline queue points at its local copy. */
+function waitingUpload(file: Attachment) {
+  return file.url.startsWith("file:");
+}
 
 function scheduleLine(order: WorkOrder) {
   if (!order.scheduledAt) return "Senza data";
@@ -116,22 +121,37 @@ export default function WorkOrderScreen() {
     await queryClient.invalidateQueries({ queryKey: ["work-order", id] });
     await queryClient.invalidateQueries({ queryKey: ["work-orders"] });
   };
+  /** Shows a queued change right away; the next sync replaces it with the server copy. */
+  const patchOrder = (update: (current: WorkOrder) => WorkOrder) =>
+    queryClient.setQueryData<WorkOrder>(["work-order", id], (current) => (current ? update(current) : current));
   const save = useMutation({
-    mutationFn: (values: WorkOrderDraft) => http.patch(`/work-orders/${id}`, workOrderBody(values)),
-    onSuccess: async () => {
+    mutationFn: (values: WorkOrderDraft) => outbox.patch(`/work-orders/${id}`, workOrderBody(values), "Modifica dell'intervento"),
+    onSuccess: async (result, values) => {
       setEditing(false);
-      await refresh();
+      if (!isQueued(result)) return refresh();
+      patchOrder((current) => ({ ...current, title: values.title, description: values.description || null, status: values.status || current.status }));
     },
   });
   const start = useMutation({
-    mutationFn: () => http.patch(`/work-orders/${id}`, { status: "IN_PROGRESS" }),
-    onSuccess: refresh,
+    mutationFn: () => outbox.patch(`/work-orders/${id}`, { status: "IN_PROGRESS" }, "Inizio dell'intervento"),
+    onSuccess: async (result) => {
+      if (!isQueued(result)) return refresh();
+      patchOrder((current) => ({ ...current, status: "IN_PROGRESS" }));
+    },
   });
   const sign = useMutation({
-    mutationFn: () => http.post(`/work-orders/${id}/signature`, { signedBy, signatureData: signature, role: signer }),
-    onSuccess: async () => {
+    mutationFn: () =>
+      outbox.post(
+        `/work-orders/${id}/signature`,
+        { signedBy, signatureData: signature, role: signer, signedAt: new Date().toISOString() },
+        signer === "TECHNICIAN" ? "Firma del tecnico" : "Firma del cliente",
+      ),
+    onSuccess: async (result) => {
       setSheet(false);
-      await refresh();
+      if (!isQueued(result)) return refresh();
+      patchOrder((current) =>
+        signer === "TECHNICIAN" ? { ...current, technicianSignedBy: signedBy } : { ...current, signedBy, status: "DONE", completedAt: new Date().toISOString() },
+      );
     },
   });
   const usePart = useMutation({
@@ -140,13 +160,26 @@ export default function WorkOrderScreen() {
       if (!partId) throw new Error("Scegli il ricambio");
       if (!partLocation) throw new Error("Scegli da dove lo prendi");
       if (!(quantity > 0)) throw new Error("Scrivi la quantità");
-      return http.post(`/work-orders/${id}/parts`, { partId, locationId: partLocation, quantity });
+      return outbox.post(`/work-orders/${id}/parts`, { partId, locationId: partLocation, quantity }, "Ricambio usato");
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      if (isQueued(result)) {
+        const part = parts.data?.find((row) => row.id === partId);
+        const location = locations.data?.find((row) => row.id === partLocation);
+        const quantity = Number(partQty.replace(",", "."));
+        patchOrder((current) => ({
+          ...current,
+          stockMovements: [
+            ...(current.stockMovements ?? []),
+            { id: result.id, quantity: -quantity, part: part ? { id: part.id, name: part.name } : null, location: location ? { name: location.name } : null },
+          ],
+        }));
+      }
       setPartQty("");
       setPartId(null);
       setPartQ("");
       setAddingPart(false);
+      if (isQueued(result)) return;
       await refresh();
       await queryClient.invalidateQueries({ queryKey: ["balances"] });
     },
@@ -170,23 +203,31 @@ export default function WorkOrderScreen() {
       await queryClient.invalidateQueries({ queryKey: ["parts"] });
     },
   });
+  const answersOf = (template: ChecklistTemplate) =>
+    template.items.map((item) => ({ id: item.id, label: item.label, checked: Boolean(checks[`${template.id}:${item.id}`]) }));
   const runChecklist = useMutation({
     mutationFn: (template: ChecklistTemplate) =>
-      http.post("/checklist-runs", {
-        templateId: template.id,
-        workOrderId: id,
-        assetId: order.data?.asset?.id,
-        completed: true,
-        answers: template.items.map((item) => ({ id: item.id, label: item.label, checked: Boolean(checks[`${template.id}:${item.id}`]) })),
-      }),
-    onSuccess: async (_, template) => {
+      outbox.post(
+        "/checklist-runs",
+        { templateId: template.id, workOrderId: id, assetId: order.data?.asset?.id, completed: true, answers: answersOf(template) },
+        `Checklist «${template.name}»`,
+      ),
+    onSuccess: async (result, template) => {
+      if (isQueued(result)) patchOrder((current) => ({ ...current, checklistRuns: [...current.checklistRuns, { id: result.id, answers: answersOf(template) }] }));
       setChecks((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(`${template.id}:`))));
-      await refresh();
+      if (!isQueued(result)) await refresh();
     },
   });
   const removePhoto = useMutation({
-    mutationFn: (photo: Attachment) => http.del(`/attachments/${photo.id}`),
-    onSuccess: refresh,
+    mutationFn: async (photo: Attachment): Promise<unknown> => {
+      if (!waitingUpload(photo)) return outbox.del(`/attachments/${photo.id}`, "Eliminazione della foto");
+      await discardQueued(photo.id);
+      return { queued: true, id: photo.id } satisfies Queued;
+    },
+    onSuccess: async (result, photo) => {
+      if (!isQueued(result)) return refresh();
+      patchOrder((current) => ({ ...current, attachments: current.attachments.filter((file) => file.id !== photo.id) }));
+    },
   });
 
   async function uploadAssets(assets: ImagePicker.ImagePickerAsset[]) {
@@ -194,13 +235,14 @@ export default function WorkOrderScreen() {
     setUploading((count) => count + assets.length);
     for (const [index, asset] of assets.entries()) {
       const type = asset.mimeType ?? "image/jpeg";
+      const fileName = `foto-${Date.now()}-${index}.${EXTENSION[type] ?? "jpg"}`;
       try {
-        await upload(
-          "/attachments",
-          { uri: asset.uri, name: `foto-${Date.now()}-${index}.${EXTENSION[type] ?? "jpg"}`, type, blob: asset.file },
-          { workOrderId: String(id) },
-        );
-        await refresh();
+        const result = await outbox.upload("/attachments", { uri: asset.uri, name: fileName, type, blob: asset.file }, { workOrderId: String(id) }, "Foto dell'intervento");
+        if (isQueued(result)) {
+          patchOrder((current) => ({ ...current, attachments: [...current.attachments, { id: result.id, fileName, mimeType: type, url: result.uri ?? asset.uri }] }));
+        } else {
+          await refresh();
+        }
       } catch (caught) {
         setPhotoError(caught instanceof Error ? `Foto non caricata: ${caught.message}` : "Foto non caricata, riprova.");
       } finally {

@@ -13,5 +13,6 @@ export * from "./reports";
 export * from "./payroll";
 export * from "./menu";
 export * from "./payments";
+export * from "./reminders";
 export * from "./inventory";
 export * from "./barcode";

@@ -44,7 +44,15 @@ function Bubble({ entry }: { entry: Entry }) {
 
 export default function AssistantScreen() {
   const consent = useAiConsent();
-  if (consent.loading) return null;
+  const theme = useTheme();
+  if (consent.loading) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <Backdrop />
+        <ActivityIndicator color={theme.colors.accent} />
+      </View>
+    );
+  }
   if (!consent.granted) return <AiConsent onBack={() => goBack()} />;
   return <AssistantChat />;
 }
@@ -165,7 +173,7 @@ function AssistantChat() {
           <Ionicons name="radio-outline" size={22} color="#F5B971" />
         </Pressy>
       </View>
-      <LiveTalk visible={live} onClose={() => setLive(false)} />
+      {live ? <LiveTalk visible onClose={() => setLive(false)} /> : null}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ padding: theme.space.lg, gap: theme.space.md, flexGrow: 1 }} keyboardShouldPersistTaps="handled">
           {entries.length === 0 ? (

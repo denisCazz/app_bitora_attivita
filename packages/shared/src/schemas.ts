@@ -182,6 +182,8 @@ export const workOrderSchema = z.object({
   customerId: z.string().optional().nullable(),
   assetId: z.string().optional().nullable(),
   assigneeId: z.string().optional().nullable(),
+  /** The recurring maintenance this job serves: closing the job moves it to the next round. */
+  scheduleId: z.string().optional().nullable(),
   title: z.string().trim().min(2).max(160),
   description: z.string().trim().max(4000).optional().nullable(),
   status: z.enum(["DRAFT", "SCHEDULED", "IN_PROGRESS", "DONE", "CANCELLED"]).optional(),
@@ -194,6 +196,8 @@ export const signatureSchema = z.object({
   signedBy: z.string().trim().min(2).max(80),
   signatureData: z.string().min(2),
   role: z.enum(["CLIENT", "TECHNICIAN"]).default("CLIENT"),
+  /** When the pen left the pad. Signatures sent from the offline queue arrive later. */
+  signedAt: z.string().datetime({ offset: true }).optional(),
 });
 
 export const checklistTemplateSchema = z.object({

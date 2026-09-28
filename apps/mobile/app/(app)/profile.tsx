@@ -3,7 +3,7 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Alert, Switch, View } from "react-native";
 import { Badge, Button, Card, Input, ListItem, Screen, Sheet, Text, useTheme } from "@rapportini/ui";
-import { downloadMyData, setAiConsent, signOut, useAccount } from "../../src/account";
+import { confirmSignOut, downloadMyData, setAiConsent, signOut, useAccount } from "../../src/account";
 import { api } from "../../src/api/client";
 import { queryClient } from "../../src/api/query";
 import { biometricLabel, setBiometricEnabled, useBiometricLock } from "../../src/auth/biometric";
@@ -144,6 +144,7 @@ export default function ProfileScreen() {
   }
 
   async function logout() {
+    if (!(await confirmSignOut())) return;
     setLeaving(true);
     await signOut();
     router.replace("/(auth)/login");

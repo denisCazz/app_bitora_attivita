@@ -18,6 +18,7 @@ const TENANT_MODELS = new Set([
   "ChecklistRun",
   "Attachment",
   "Schedule",
+  "CustomerReminder",
   "SparePart",
   "StockLocation",
   "StockMovement",

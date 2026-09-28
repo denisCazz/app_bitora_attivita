@@ -6,6 +6,7 @@ import {
   DEFAULT_ACCENT,
   DEFAULT_SLOT_MINUTES,
   mergeTerminology,
+  nextDueAt,
   scheduleSchema,
   signatureSchema,
   slotMinutes,
@@ -19,7 +20,7 @@ import { agenda, overlapsFor } from "../lib/agenda";
 import { categoryOfTenant } from "../lib/catalog";
 import { assertCustomFields } from "../lib/fields";
 import { renderWorkOrderPdf } from "../lib/pdf";
-import { prisma, tenantDb } from "../lib/prisma";
+import { prisma, tenantDb, type TenantDb } from "../lib/prisma";
 import { removeUpload, saveUpload } from "../lib/storage";
 import { tenantId } from "../plugins/auth";
 import { moduleGuard, permit } from "../plugins/guards";
@@ -35,6 +36,34 @@ function search(request: { query: unknown }): string {
 function recordOf(value: unknown): Partial<Terminology> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   return value as Partial<Terminology>;
+}
+
+const SIGNATURE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+/** The device clock can be wrong: accept its time only within a plausible window. */
+function signatureTime(value: string | undefined): Date {
+  const now = Date.now();
+  const at = value ? Date.parse(value) : NaN;
+  if (!Number.isFinite(at) || at > now + CLOCK_SKEW_MS || at < now - SIGNATURE_MAX_AGE_MS) return new Date(now);
+  return new Date(Math.min(at, now));
+}
+
+async function assertSchedule(db: TenantDb, scheduleId: string | null | undefined) {
+  if (scheduleId) await must(db.schedule.findFirst({ where: { id: scheduleId }, select: { id: true } }), "Scadenza");
+}
+
+/** Closing a job starts the next round of the recurring maintenance it served. */
+async function advanceSchedule(db: TenantDb, workOrderId: string, completedAt: Date) {
+  const order = await db.workOrder.findFirst({
+    where: { id: workOrderId },
+    select: { schedule: { select: { id: true, dueAt: true, intervalMonths: true } } },
+  });
+  const schedule = order?.schedule;
+  if (!schedule?.intervalMonths) return;
+  const next = nextDueAt(schedule.dueAt, completedAt, schedule.intervalMonths);
+  if (next <= schedule.dueAt) return;
+  await db.schedule.update({ where: { id: schedule.id }, data: { dueAt: next, lastRemindedAt: null } });
 }
 
 function documentTitle(workOrder: string): string {
@@ -187,13 +216,16 @@ export async function coreRoutes(app: FastifyInstance) {
   app.post("/work-orders", { preHandler: [app.requireTenant, permit("work_orders.write"), moduleGuard("work_orders")] }, async (request) => {
     const body = parseBody(workOrderSchema, request.body);
     const id = tenantId(request);
+    const db = tenantDb(id);
     const customFields = await assertCustomFields(id, "WORK_ORDER", body.customFields);
-    return tenantDb(id).workOrder.create({
+    await assertSchedule(db, body.scheduleId);
+    return db.workOrder.create({
       data: {
         tenantId: id,
         customerId: body.customerId || null,
         assetId: body.assetId || null,
         assigneeId: body.assigneeId || null,
+        scheduleId: body.scheduleId || null,
         title: body.title,
         description: blankToNull(body.description),
         status: body.status ?? "SCHEDULED",
@@ -212,30 +244,39 @@ export async function coreRoutes(app: FastifyInstance) {
   app.patch("/work-orders/:id", { preHandler: [app.requireTenant, permit("work_orders.write"), moduleGuard("work_orders")] }, async (request) => {
     const body = parseBody(workOrderSchema.partial(), request.body);
     const db = tenantDb(tenantId(request));
-    await must(db.workOrder.findFirst({ where: { id: idOf(request) } }), "Intervento");
-    return db.workOrder.update({
+    const current = await must(db.workOrder.findFirst({ where: { id: idOf(request) } }), "Intervento");
+    await assertSchedule(db, body.scheduleId);
+    const completing = body.status === "DONE" && current.status !== "DONE";
+    const completedAt = new Date();
+    const updated = await db.workOrder.update({
       where: { id: idOf(request) },
       data: {
         ...body,
+        scheduleId: body.scheduleId === undefined ? undefined : body.scheduleId || null,
         scheduledAt: body.scheduledAt === undefined ? undefined : body.scheduledAt ? new Date(body.scheduledAt) : null,
-        completedAt: body.status === "DONE" ? new Date() : undefined,
+        completedAt: body.status === "DONE" ? completedAt : undefined,
         customFields: body.customFields,
       },
       include: orderInclude,
     });
+    if (completing) await advanceSchedule(db, updated.id, completedAt);
+    return updated;
   });
 
   app.post("/work-orders/:id/signature", { preHandler: [app.requireTenant, permit("work_orders.write"), moduleGuard("work_orders")] }, async (request) => {
     const body = parseBody(signatureSchema, request.body);
     const db = tenantDb(tenantId(request));
-    await must(db.workOrder.findFirst({ where: { id: idOf(request) } }), "Intervento");
+    const current = await must(db.workOrder.findFirst({ where: { id: idOf(request) } }), "Intervento");
     const technician = body.role === "TECHNICIAN";
-    return db.workOrder.update({
+    const signedAt = signatureTime(body.signedAt);
+    const updated = await db.workOrder.update({
       where: { id: idOf(request) },
       data: technician
-        ? { technicianSignature: body.signatureData, technicianSignedBy: body.signedBy, technicianSignedAt: new Date() }
-        : { signatureData: body.signatureData, signedBy: body.signedBy, status: "DONE", completedAt: new Date() },
+        ? { technicianSignature: body.signatureData, technicianSignedBy: body.signedBy, technicianSignedAt: signedAt }
+        : { signatureData: body.signatureData, signedBy: body.signedBy, status: "DONE", completedAt: signedAt },
     });
+    if (!technician && current.status !== "DONE") await advanceSchedule(db, updated.id, signedAt);
+    return updated;
   });
 
   app.post("/work-orders/:id/parts", { preHandler: [app.requireTenant, permit("stock.adjust"), moduleGuard("work_orders")] }, async (request) => {

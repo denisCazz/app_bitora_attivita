@@ -1,4 +1,5 @@
 import "react-native-gesture-handler";
+import { onlineManager } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { ThemeProvider } from "@rapportini/ui";
 import * as Notifications from "expo-notifications";
@@ -14,8 +15,18 @@ import { hydrateBiometric, useBiometricLock } from "../src/auth/biometric";
 import { useAuth } from "../src/auth/store";
 import { BiometricLock } from "../src/components/BiometricLock";
 import { LaunchSplash } from "../src/components/LaunchSplash";
+import { RootError, ScreenError } from "../src/components/ScreenError";
 import { stackOptions } from "../src/navigation";
 import { useManifest, useTenantRepair } from "../src/session";
+
+// isConnected is null until NetInfo knows: treat that as online, the queue catches real failures.
+onlineManager.setEventListener((setQueriesOnline) =>
+  NetInfo.addEventListener((state) => {
+    const connected = state.isConnected !== false;
+    setOnline(connected);
+    setQueriesOnline(connected);
+  }),
+);
 
 SplashScreen.setOptions({ duration: 400, fade: true });
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -30,12 +41,14 @@ Notifications.setNotificationHandler({
   }),
 });
 
+export const ErrorBoundary = RootError;
+
 function Shell() {
   const manifest = useManifest();
   useTenantRepair(manifest.error instanceof ApiError && manifest.error.status === 409);
   return (
     <ThemeProvider accent={manifest.data?.tenant.branding.accent}>
-      <Stack screenOptions={{ ...stackOptions, animation: "fade", fullScreenGestureEnabled: false }} />
+      <Stack screenOptions={{ ...stackOptions, animation: "fade", fullScreenGestureEnabled: false }} unstable_screenErrorBoundary={ScreenError} />
       <BiometricLock />
     </ThemeProvider>
   );
@@ -50,7 +63,6 @@ export default function RootLayout() {
 
   useEffect(() => {
     void hydrate().then(() => hydrateBiometric(Boolean(useAuth.getState().refreshToken)));
-    return NetInfo.addEventListener((state) => setOnline(Boolean(state.isConnected)));
   }, [hydrate]);
 
   return (
