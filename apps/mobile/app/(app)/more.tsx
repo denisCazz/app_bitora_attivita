@@ -10,7 +10,7 @@ import { queryClient } from "../../src/api/query";
 import { useAuth } from "../../src/auth/store";
 import { daysLeft, monthly } from "../../src/billing";
 import { t } from "../../src/i18n";
-import { can, modulePermitted, useManifest } from "../../src/session";
+import { can, modulePermitted, useManifest, useMenu } from "../../src/session";
 
 function initials(name: string) {
   const parts = name.split(/\s+/).filter(Boolean);
@@ -39,6 +39,7 @@ export default function MoreScreen() {
   const role = manifest.data?.role.name;
   const showTeam = Boolean(manifest.data?.managesPeople) || can(manifest.data, "team.manage");
   const showSettings = can(manifest.data, "settings.manage");
+  const extra = useMenu("MORE").filter((item) => item.route && item.kind !== "MODULE" && (!item.permission || can(manifest.data, item.permission)));
 
   function titleOf(key: string, label: string) {
     if (key === "work_orders") return terms?.workOrders ?? label;
@@ -159,6 +160,14 @@ export default function MoreScreen() {
               subtitle={module.status === "trial" ? `In prova · ${daysLeft(module.trialEndsAt)} giorni` : module.description}
               onPress={() => router.push(`/(app)${module.route}` as never)}
             />
+          ))}
+        </Menu>
+      ) : null}
+
+      {extra.length ? (
+        <Menu>
+          {extra.map((item) => (
+            <MenuRow key={item.key} icon={glyph(item.icon)} title={item.label} subtitle={item.subtitle ?? undefined} onPress={() => router.push(`/(app)${item.route}` as never)} />
           ))}
         </Menu>
       ) : null}

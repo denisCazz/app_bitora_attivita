@@ -1,8 +1,8 @@
-import type { Prisma } from "@prisma/client";
-import { categoryModuleSchema, categoryRoleSchema, categorySchema, isModuleKey, moduleDefSchema, needSchema, PERMISSIONS, type ResolvedCategory } from "@rapportini/shared";
+import { categoryModuleSchema, categoryRoleSchema, categorySchema, isModuleKey, moduleDefSchema, needSchema, type ResolvedCategory } from "@rapportini/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { HttpError, must, parseBody } from "../errors";
+import { applyCategoryConfig } from "../lib/category-config";
 import { catalogNodes, invalidateCatalog, moduleDefinitions, needDefinitions, resolvedCategory } from "../lib/catalog";
 import { prisma } from "../lib/prisma";
 import { ensureModulePrice } from "../lib/stripe";
@@ -25,14 +25,6 @@ async function assertParent(categoryId: string | null, parentId: string | null |
   }
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function text(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
 async function platformAccounts() {
   const users = await prisma.user.findMany({
     orderBy: { createdAt: "desc" },
@@ -44,7 +36,8 @@ async function platformAccounts() {
           tenant: {
             include: {
               modules: { orderBy: { moduleKey: "asc" } },
-              customFields: { orderBy: [{ entity: "asc" }, { label: "asc" }] },
+              fieldDefs: { where: { builtIn: false }, include: { options: { orderBy: { sortOrder: "asc" } }, entity: true }, orderBy: { label: "asc" } },
+              termValues: true,
               roles: { orderBy: { createdAt: "asc" } },
             },
           },
@@ -65,17 +58,14 @@ async function platformAccounts() {
     shops: user.memberships.map((membership) => {
       const tenant = membership.tenant;
       const category = categories.get(tenant.categoryId);
-      const settings = asRecord(tenant.settings);
-      const branding = asRecord(tenant.branding);
-      const terminology = asRecord(settings.terminology);
       return {
         id: tenant.id,
         name: tenant.name,
         roleName: membership.role.name,
         category: { label: category?.label ?? "Categoria", path: category?.path.map((node) => node.label) ?? [] },
         needs: tenant.needs.map((key) => ({ key, label: category?.needs.find((need) => need.key === key)?.label ?? key })),
-        branding: { accent: text(branding.accent), logoUrl: text(branding.logoUrl) },
-        terminology: Object.fromEntries(Object.entries(terminology).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim().length > 0)),
+        branding: { accent: tenant.accent, logoUrl: tenant.logoUrl },
+        terminology: Object.fromEntries(tenant.termValues.map((row) => [row.termKey, row.value])),
         modules: tenant.modules.map((row) => {
           const fromCategory = category?.modules.find((module) => module.key === row.moduleKey);
           const fromCatalog = definitions.find((module) => module.key === row.moduleKey);
@@ -88,14 +78,14 @@ async function platformAccounts() {
             trialEndsAt: row.trialEndsAt?.toISOString() ?? null,
           };
         }),
-        fields: tenant.customFields.map((field) => ({
+        fields: tenant.fieldDefs.map((field) => ({
           id: field.id,
-          entity: field.entity,
+          entity: field.entity.key,
           key: field.key,
           label: field.label,
           type: field.type,
-          required: field.required,
-          options: Array.isArray(field.options) ? field.options.map(String) : [],
+          required: field.required ?? false,
+          options: field.options.map((option) => option.value),
         })),
         roles: tenant.roles.map((role) => ({ name: role.name, isSystem: role.isSystem, permissions: role.permissions })),
       };
@@ -142,7 +132,7 @@ export async function adminRoutes(app: FastifyInstance) {
       })),
       modules,
       needs,
-      permissions: PERMISSIONS,
+      permissions: (await prisma.permissionDef.findMany({ orderBy: [{ sortOrder: "asc" }, { key: "asc" }] })).map((row) => row.key),
     };
   });
 
@@ -151,21 +141,21 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post("/admin/categories", { preHandler: admin }, async (request) => {
     const body = parseBody(categorySchema, request.body);
     await assertParent(null, body.parentId);
+    const { terminology, presets, ...rest } = body;
     const created = await prisma.category.create({
       data: {
-        key: body.key,
-        parentId: body.parentId ?? null,
-        label: body.label,
-        description: body.description ?? "",
-        icon: body.icon ?? "apps-outline",
-        accent: body.accent ?? null,
-        image: body.image ?? null,
-        terminology: body.terminology ?? {},
-        presets: (body.presets ?? {}) as Prisma.InputJsonValue,
-        sortOrder: body.sortOrder ?? 0,
-        active: body.active ?? true,
+        key: rest.key,
+        parentId: rest.parentId ?? null,
+        label: rest.label,
+        description: rest.description ?? "",
+        icon: rest.icon ?? "apps-outline",
+        accent: rest.accent ?? null,
+        image: rest.image ?? null,
+        sortOrder: rest.sortOrder ?? 0,
+        active: rest.active ?? true,
       },
     });
+    if (terminology || presets) await applyCategoryConfig(created.id, { terminology, presets });
     invalidateCatalog();
     return created;
   });
@@ -175,14 +165,9 @@ export async function adminRoutes(app: FastifyInstance) {
     const id = param(request, "id");
     const current = await must(prisma.category.findUnique({ where: { id } }), "Categoria");
     await assertParent(id, body.parentId === undefined ? current.parentId : body.parentId);
-    const updated = await prisma.category.update({
-      where: { id },
-      data: {
-        ...body,
-        presets: body.presets === undefined ? undefined : (body.presets as Prisma.InputJsonValue),
-        terminology: body.terminology === undefined ? undefined : body.terminology,
-      },
-    });
+    const { terminology, presets, ...rest } = body;
+    const updated = await prisma.category.update({ where: { id }, data: rest });
+    if (terminology || presets) await applyCategoryConfig(id, { terminology, presets });
     invalidateCatalog();
     return updated;
   });

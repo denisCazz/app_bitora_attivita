@@ -1,14 +1,42 @@
-import { categoryChain, resolveCategory, type CategoryNode, type ModuleDefRow, type NeedRow, type ResolvedCategory } from "@rapportini/shared";
+import {
+  categoryChain,
+  resolveCategory,
+  type CategoryNode,
+  type CategoryPresets,
+  type FieldLayer,
+  type ModuleDefRow,
+  type NavLayer,
+  type NeedRow,
+  type ResolvedCategory,
+  type TermLayer,
+  type VocabLayer,
+  type VocabListMeta,
+} from "@rapportini/shared";
 import { HttpError } from "../errors";
 import { prisma } from "./prisma";
+import { presetFromSamples, type SampleRow } from "./samples";
 
 const TTL_MS = 15_000;
+
+const LEGACY_ENTITY: Record<string, "CUSTOMER" | "ASSET" | "WORK_ORDER" | "PRODUCT"> = {
+  customer: "CUSTOMER",
+  asset: "ASSET",
+  work_order: "WORK_ORDER",
+  menu_item: "PRODUCT",
+};
 
 interface Snapshot {
   loadedAt: number;
   nodes: CategoryNode[];
   moduleDefs: ModuleDefRow[];
   needs: NeedRow[];
+  fields: FieldLayer[];
+  terms: TermLayer[];
+  termDefaults: Record<string, string>;
+  vocabLists: VocabListMeta[];
+  vocab: VocabLayer[];
+  nav: NavLayer[];
+  samples: SampleRow[];
   resolved: Map<string, ResolvedCategory>;
 }
 
@@ -17,12 +45,114 @@ let loading: Promise<Snapshot> | null = null;
 const tenantCategory = new Map<string, { categoryId: string; at: number }>();
 
 async function load(): Promise<Snapshot> {
-  const [categories, moduleDefs, needs] = await Promise.all([
+  const [categories, moduleDefs, needs, fieldDefs, termDefs, termValues, vocabLists, vocabItems, navEntries, samples] = await Promise.all([
     prisma.category.findMany({ include: { modules: true, roles: true }, orderBy: [{ sortOrder: "asc" }, { label: "asc" }] }),
     prisma.moduleDef.findMany({ orderBy: { sortOrder: "asc" } }),
     prisma.need.findMany({ orderBy: [{ sortOrder: "asc" }, { label: "asc" }] }),
+    prisma.fieldDef.findMany({ where: { tenantId: null }, include: { options: true, entity: true, refEntity: true } }),
+    prisma.termDef.findMany(),
+    prisma.termValue.findMany({ where: { tenantId: null } }),
+    prisma.vocabList.findMany(),
+    prisma.vocabItem.findMany({ where: { tenantId: null } }),
+    prisma.navEntry.findMany({ where: { tenantId: null } }),
+    prisma.sampleRecord.findMany({ include: { values: true }, orderBy: { sortOrder: "asc" } }),
   ]);
-  return { loadedAt: Date.now(), nodes: categories, moduleDefs, needs, resolved: new Map() };
+  const presetsByCategory = new Map<string, CategoryPresets>();
+  const checklists = await prisma.checklistPreset.findMany({ include: { items: { orderBy: { sortOrder: "asc" } } } });
+  for (const category of categories) {
+    const ownFields = fieldDefs.filter((field) => field.categoryId === category.id && !field.builtIn);
+    const vocab = (list: string) => vocabItems.filter((item) => item.listKey === list && item.categoryId === category.id && item.visible);
+    const income = vocab("ledger_income").map((item) => item.label);
+    const expense = vocab("ledger_expense").map((item) => item.label);
+    const sampleRows = samples.filter((row) => row.categoryId === category.id);
+    presetsByCategory.set(category.id, {
+      assetTypes: vocab("asset_types").map((item) => item.label),
+      customFields: ownFields.flatMap((field) => {
+        const entity = LEGACY_ENTITY[field.entity.key];
+        if (!entity || !field.label || !field.type) return [];
+        const type = field.type === "TEXT" || field.type === "NUMBER" || field.type === "DATE" || field.type === "SELECT" || field.type === "PHOTO" ? field.type : null;
+        if (!type) return [];
+        return [{ entity, key: field.key, label: field.label, type, options: field.options.map((option) => option.value) }];
+      }),
+      checklists: checklists
+        .filter((list) => list.categoryId === category.id)
+        .map((list) => ({ name: list.name, kind: list.kind, items: list.items.map((item) => ({ id: item.itemKey, label: item.label })) })),
+      scheduleKinds: vocab("schedule_kinds").map((item) => ({
+        key: item.key,
+        label: item.label,
+        ...(item.tone === "accent" || item.tone === "warning" || item.tone === "success" ? { tone: item.tone } : {}),
+        ...(item.minutes ? { minutes: item.minutes } : {}),
+      })),
+      stations: vocab("stations").map((item) => ({ key: item.key, label: item.label })),
+      dashboard: vocab("dashboard_widgets").map((item) => item.key),
+      ledger: { ...(income.length ? { income } : {}), ...(expense.length ? { expense } : {}) },
+      sample: presetFromSamples(sampleRows),
+    });
+  }
+  const nodes: CategoryNode[] = categories.map((category) => ({
+    ...category,
+    terminology: Object.fromEntries(termValues.filter((row) => row.categoryId === category.id).map((row) => [row.termKey, row.value])),
+    presets: presetsByCategory.get(category.id) ?? {},
+  }));
+  return {
+    loadedAt: Date.now(),
+    nodes,
+    moduleDefs,
+    needs,
+    fields: fieldDefs.map((field) => ({
+      scopeKey: field.scopeKey,
+      categoryId: field.categoryId,
+      tenantId: field.tenantId,
+      entityKey: field.entity.key,
+      key: field.key,
+      label: field.label,
+      type: field.type,
+      builtIn: field.builtIn,
+      required: field.required,
+      visible: field.visible,
+      sortOrder: field.sortOrder,
+      section: field.section,
+      showInList: field.showInList,
+      refEntityKey: field.refEntity?.key ?? null,
+      placeholder: field.placeholder,
+      help: field.help,
+      options: field.options.map((option) => ({ value: option.value, label: option.label, sortOrder: option.sortOrder })),
+    })),
+    terms: termValues.map((row) => ({ scopeKey: row.scopeKey, categoryId: row.categoryId, tenantId: row.tenantId, key: row.termKey, value: row.value })),
+    termDefaults: Object.fromEntries(termDefs.map((row) => [row.key, row.defaultValue])),
+    vocabLists: vocabLists.map((list) => ({ key: list.key, replace: list.replace })),
+    vocab: vocabItems.map((item) => ({
+      scopeKey: item.scopeKey,
+      categoryId: item.categoryId,
+      tenantId: item.tenantId,
+      listKey: item.listKey,
+      key: item.key,
+      label: item.label,
+      tone: item.tone,
+      minutes: item.minutes,
+      sortOrder: item.sortOrder,
+      visible: item.visible,
+    })),
+    nav: navEntries.map((entry) => ({
+      scopeKey: entry.scopeKey,
+      categoryId: entry.categoryId,
+      tenantId: entry.tenantId,
+      placement: entry.placement,
+      key: entry.key,
+      parentKey: entry.parentKey,
+      kind: entry.kind,
+      moduleKey: entry.moduleKey,
+      route: entry.route,
+      label: entry.label,
+      icon: entry.icon,
+      subtitle: entry.subtitle,
+      permission: entry.permission,
+      sortOrder: entry.sortOrder,
+      visible: entry.visible,
+    })),
+    samples,
+    resolved: new Map(),
+  };
 }
 
 async function current(): Promise<Snapshot> {
@@ -34,9 +164,82 @@ async function current(): Promise<Snapshot> {
   return snapshot;
 }
 
+const tenantOverlay = new Map<string, { at: number; fields: FieldLayer[]; terms: TermLayer[]; vocab: VocabLayer[]; nav: NavLayer[] }>();
+
 export function invalidateCatalog() {
   snapshot = null;
   tenantCategory.clear();
+  tenantOverlay.clear();
+}
+
+export function invalidateTenantConfig(tenantId: string) {
+  tenantOverlay.delete(tenantId);
+  tenantCategory.delete(tenantId);
+}
+
+export async function tenantConfigRows(tenantId: string) {
+  const hit = tenantOverlay.get(tenantId);
+  if (hit && Date.now() - hit.at < TTL_MS) return hit;
+  const [fieldDefs, termValues, vocabItems, navEntries] = await Promise.all([
+    prisma.fieldDef.findMany({ where: { tenantId }, include: { options: true, entity: true, refEntity: true } }),
+    prisma.termValue.findMany({ where: { tenantId } }),
+    prisma.vocabItem.findMany({ where: { tenantId } }),
+    prisma.navEntry.findMany({ where: { tenantId } }),
+  ]);
+  const rows = {
+    at: Date.now(),
+    fields: fieldDefs.map((field) => ({
+      scopeKey: field.scopeKey,
+      categoryId: field.categoryId,
+      tenantId: field.tenantId,
+      entityKey: field.entity.key,
+      key: field.key,
+      label: field.label,
+      type: field.type,
+      builtIn: field.builtIn,
+      required: field.required,
+      visible: field.visible,
+      sortOrder: field.sortOrder,
+      section: field.section,
+      showInList: field.showInList,
+      refEntityKey: field.refEntity?.key ?? null,
+      placeholder: field.placeholder,
+      help: field.help,
+      options: field.options.map((option) => ({ value: option.value, label: option.label, sortOrder: option.sortOrder })),
+    })),
+    terms: termValues.map((row) => ({ scopeKey: row.scopeKey, categoryId: row.categoryId, tenantId: row.tenantId, key: row.termKey, value: row.value })),
+    vocab: vocabItems.map((item) => ({
+      scopeKey: item.scopeKey,
+      categoryId: item.categoryId,
+      tenantId: item.tenantId,
+      listKey: item.listKey,
+      key: item.key,
+      label: item.label,
+      tone: item.tone,
+      minutes: item.minutes,
+      sortOrder: item.sortOrder,
+      visible: item.visible,
+    })),
+    nav: navEntries.map((entry) => ({
+      scopeKey: entry.scopeKey,
+      categoryId: entry.categoryId,
+      tenantId: entry.tenantId,
+      placement: entry.placement,
+      key: entry.key,
+      parentKey: entry.parentKey,
+      kind: entry.kind,
+      moduleKey: entry.moduleKey,
+      route: entry.route,
+      label: entry.label,
+      icon: entry.icon,
+      subtitle: entry.subtitle,
+      permission: entry.permission,
+      sortOrder: entry.sortOrder,
+      visible: entry.visible,
+    })),
+  };
+  tenantOverlay.set(tenantId, rows);
+  return rows;
 }
 
 export async function catalogNodes() {
@@ -49,6 +252,18 @@ export async function moduleDefinitions() {
 
 export async function needDefinitions() {
   return (await current()).needs;
+}
+
+export async function configRows() {
+  const state = await current();
+  return {
+    fields: state.fields,
+    terms: state.terms,
+    termDefaults: state.termDefaults,
+    vocabLists: state.vocabLists,
+    vocab: state.vocab,
+    nav: state.nav,
+  };
 }
 
 export async function resolvedCategory(categoryId: string): Promise<ResolvedCategory> {

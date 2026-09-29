@@ -1,5 +1,5 @@
-import { EXTRA_SEAT_CENTS, INCLUDED_SEATS, seatCapacity, seatMonthlyCents } from "@rapportini/shared";
 import { must } from "../errors";
+import { platformInt } from "./platform";
 import { prisma } from "./prisma";
 
 function openInvites() {
@@ -23,14 +23,15 @@ export async function loadTeam(tenantId: string, viewerId?: string) {
   const ownerId = members[0]?.id ?? null;
   const active = members.filter((member) => member.status === "ACTIVE").length;
   const extra = tenant.extraSeats;
+  const [included, priceCents] = await Promise.all([platformInt("included_seats"), platformInt("extra_seat_cents")]);
   return {
     seats: {
       used: active + invites.length,
-      included: INCLUDED_SEATS,
+      included,
       extra,
-      capacity: seatCapacity(extra),
-      priceCents: EXTRA_SEAT_CENTS,
-      monthlyCents: seatMonthlyCents(extra),
+      capacity: included + extra,
+      priceCents,
+      monthlyCents: Math.max(0, extra) * priceCents,
     },
     members: members.map((member) => ({
       id: member.id,
@@ -56,6 +57,7 @@ export async function loadTeam(tenantId: string, viewerId?: string) {
 
 /** Keeps the oldest memberships inside the paid capacity and drops invites that no longer fit. */
 export async function applyExtraSeats(tenantId: string, extraSeats: number, subscriptionId?: string | null) {
+  const included = await platformInt("included_seats");
   await prisma.$transaction(async (tx) => {
     await tx.tenant.update({
       where: { id: tenantId },
@@ -64,7 +66,7 @@ export async function applyExtraSeats(tenantId: string, extraSeats: number, subs
         ...(subscriptionId !== undefined ? { seatsStripeSubscriptionId: subscriptionId } : {}),
       },
     });
-    const capacity = seatCapacity(extraSeats);
+    const capacity = included + Math.max(0, extraSeats);
     const active = await tx.membership.findMany({
       where: { tenantId, status: "ACTIVE" },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],

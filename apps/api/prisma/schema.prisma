@@ -13,21 +13,6 @@ enum MembershipStatus {
   SUSPENDED
 }
 
-enum CustomFieldType {
-  TEXT
-  NUMBER
-  DATE
-  SELECT
-  PHOTO
-}
-
-enum CustomFieldEntity {
-  CUSTOMER
-  ASSET
-  WORK_ORDER
-  PRODUCT
-}
-
 enum WorkOrderStatus {
   DRAFT
   SCHEDULED
@@ -101,6 +86,40 @@ enum WorkPaymentStatus {
   CANCELLED
 }
 
+enum ModuleKind {
+  NATIVE
+  CUSTOM
+}
+
+enum FieldType {
+  TEXT
+  LONG_TEXT
+  NUMBER
+  MONEY
+  DATE
+  DATETIME
+  BOOLEAN
+  SELECT
+  MULTI_SELECT
+  PHOTO
+  REFERENCE
+  SIGNATURE
+}
+
+enum NavPlacement {
+  TAB
+  MORE
+  SETTINGS
+  HOME_ACTIONS
+}
+
+enum NavKind {
+  MODULE
+  ROUTE
+  GROUP
+  LINK
+}
+
 model User {
   id                 String              @id @default(cuid())
   email              String              @unique
@@ -125,6 +144,7 @@ model User {
   assignedOrders     WorkOrder[]         @relation("Assignee")
   payrollPostings    PayrollPosting[]
   idempotentRequests IdempotentRequest[]
+  entityRecords      EntityRecord[]
 }
 
 /// Replayable response for a write sent with an Idempotency-Key, so offline retries never apply twice.
@@ -171,24 +191,25 @@ model PushToken {
 }
 
 model Tenant {
-  id                        String              @id @default(cuid())
+  id                        String                  @id @default(cuid())
   name                      String
   categoryId                String
-  category                  Category            @relation(fields: [categoryId], references: [id])
-  needs                     String[]            @default([])
-  settings                  Json                @default("{}")
-  branding                  Json                @default("{}")
-  stripeCustomerId          String?             @unique
-  extraSeats                Int                 @default(0)
+  category                  Category                @relation(fields: [categoryId], references: [id])
+  needs                     String[]                @default([])
+  accent                    String?
+  logoUrl                   String?
+  activity                  String?
+  menuSourceUrl             String?
+  stripeCustomerId          String?                 @unique
+  extraSeats                Int                     @default(0)
   seatsStripeSubscriptionId String?
-  storeAccountToken         String              @unique @default(dbgenerated("(gen_random_uuid())::text"))
-  createdAt                 DateTime            @default(now())
-  updatedAt                 DateTime            @updatedAt
+  storeAccountToken         String                  @unique @default(dbgenerated("(gen_random_uuid())::text"))
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
   locations                 Location[]
   memberships               Membership[]
   roles                     Role[]
   modules                   TenantModule[]
-  customFields              CustomFieldDef[]
   customers                 Customer[]
   assets                    Asset[]
   workOrders                WorkOrder[]
@@ -217,32 +238,44 @@ model Tenant {
   notifications             Notification[]
   storePurchases            StorePurchase[]
   customerReminders         CustomerReminder[]
+  paymentSettings           TenantPaymentSettings?
+  reminderSettings          TenantReminderSettings?
+  fieldDefs                 FieldDef[]
+  termValues                TermValue[]
+  vocabItems                VocabItem[]
+  navEntries                NavEntry[]
+  fieldValues               FieldValue[]
+  entityRecords             EntityRecord[]
 
   @@index([categoryId])
   @@index([seatsStripeSubscriptionId])
 }
 
 model Category {
-  id          String           @id @default(cuid())
-  key         String           @unique
-  parentId    String?
-  parent      Category?        @relation("CategoryTree", fields: [parentId], references: [id])
-  children    Category[]       @relation("CategoryTree")
-  label       String
-  description String           @default("")
-  icon        String           @default("apps-outline")
-  accent      String?
-  image       String?
-  terminology Json             @default("{}")
-  presets     Json             @default("{}")
-  sortOrder   Int              @default(0)
-  active      Boolean          @default(true)
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  modules     CategoryModule[]
-  roles       CategoryRole[]
-  needs       Need[]
-  tenants     Tenant[]
+  id               String            @id @default(cuid())
+  key              String            @unique
+  parentId         String?
+  parent           Category?         @relation("CategoryTree", fields: [parentId], references: [id])
+  children         Category[]        @relation("CategoryTree")
+  label            String
+  description      String            @default("")
+  icon             String            @default("apps-outline")
+  accent           String?
+  image            String?
+  sortOrder        Int               @default(0)
+  active           Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  modules          CategoryModule[]
+  roles            CategoryRole[]
+  needs            Need[]
+  tenants          Tenant[]
+  fieldDefs        FieldDef[]
+  termValues       TermValue[]
+  vocabItems       VocabItem[]
+  navEntries       NavEntry[]
+  checklistPresets ChecklistPreset[]
+  samples          SampleRecord[]
 
   @@index([parentId])
 }
@@ -279,9 +312,32 @@ model ModuleDef {
   active          Boolean          @default(true)
   stripeProductId String?          @unique
   stripePriceId   String?          @unique
+  kind            ModuleKind       @default(NATIVE)
+  route           String           @default("")
+  readPermission  String           @default("")
+  writePermission String?
+  entityId        String?
+  entity          EntityDef?       @relation(fields: [entityId], references: [key])
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   categories      CategoryModule[]
+  permissions     PermissionDef[]
+
+  @@index([entityId])
+}
+
+model PermissionDef {
+  key         String    @id
+  moduleKey   String
+  module      ModuleDef @relation(fields: [moduleKey], references: [key], onDelete: Cascade)
+  section     String
+  label       String
+  description String    @default("")
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([moduleKey])
 }
 
 model CategoryModule {
@@ -393,7 +449,6 @@ model TenantModule {
   tenant               Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   moduleKey            String
   enabled              Boolean        @default(true)
-  config               Json           @default("{}")
   licensed             Boolean        @default(false)
   billingSource        BillingSource?
   licenseExpiresAt     DateTime?
@@ -426,23 +481,6 @@ model StorePurchase {
   @@index([tenantId, moduleKey])
 }
 
-model CustomFieldDef {
-  id        String            @id @default(cuid())
-  tenantId  String
-  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  entity    CustomFieldEntity
-  key       String
-  label     String
-  type      CustomFieldType
-  required  Boolean           @default(false)
-  options   Json              @default("[]")
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
-
-  @@unique([tenantId, entity, key])
-  @@index([tenantId, entity])
-}
-
 model Customer {
   id               String             @id @default(cuid())
   tenantId         String
@@ -453,7 +491,6 @@ model Customer {
   address          String?
   city             String?
   notes            String?
-  customFields     Json               @default("{}")
   /// Set when the customer unsubscribes from maintenance reminders.
   reminderOptOutAt DateTime?
   createdAt        DateTime           @default(now())
@@ -482,7 +519,6 @@ model Asset {
   serialNumber String?
   installedAt  DateTime?
   notes        String?
-  customFields Json        @default("{}")
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   workOrders   WorkOrder[]
@@ -516,7 +552,6 @@ model WorkOrder {
   technicianSignature String?
   technicianSignedBy  String?
   technicianSignedAt  DateTime?
-  customFields        Json              @default("{}")
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
   checklistRuns       ChecklistRun[]
@@ -531,16 +566,16 @@ model WorkOrder {
 }
 
 model ChecklistTemplate {
-  id        String         @id @default(cuid())
-  tenantId  String
-  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name      String
-  kind      String         @default("GENERIC")
-  items     Json
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
-  runs      ChecklistRun[]
-  schedules Schedule[]
+  id            String                  @id @default(cuid())
+  tenantId      String
+  tenant        Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String
+  kind          String                  @default("GENERIC")
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  templateItems ChecklistTemplateItem[]
+  runs          ChecklistRun[]
+  schedules     Schedule[]
 
   @@index([tenantId])
 }
@@ -554,8 +589,8 @@ model ChecklistRun {
   workOrderId String?
   workOrder   WorkOrder?         @relation(fields: [workOrderId], references: [id])
   assetId     String?
-  answers     Json
   completedAt DateTime?
+  runAnswers  ChecklistAnswer[]
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
 
@@ -696,19 +731,18 @@ model DiningTable {
 }
 
 model MenuItem {
-  id           String             @id @default(cuid())
-  tenantId     String
-  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name         String
-  category     String
-  station      String
-  price        Decimal            @db.Decimal(10, 2)
-  available    Boolean            @default(true)
-  customFields Json               @default("{}")
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
-  modifiers    MenuItemModifier[]
-  lines        OrderLine[]
+  id        String             @id @default(cuid())
+  tenantId  String
+  tenant    Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  category  String
+  station   String
+  price     Decimal            @db.Decimal(10, 2)
+  available Boolean            @default(true)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  modifiers MenuItemModifier[]
+  lines     OrderLine[]
 
   @@index([tenantId, category])
 }
@@ -969,4 +1003,318 @@ model Notification {
 
   @@index([tenantId, createdAt])
   @@index([tenantId, userId, dedupeKey])
+}
+
+/// A kind of record: native tables (customer, asset, …) or a custom module created from the console.
+model EntityDef {
+  key           String         @id
+  label         String
+  labelPlural   String
+  icon          String         @default("apps-outline")
+  native        Boolean        @default(false)
+  titleFieldKey String         @default("name")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  modules       ModuleDef[]
+  fields        FieldDef[]     @relation("EntityFields")
+  refFields     FieldDef[]     @relation("FieldRefEntity")
+  records       EntityRecord[]
+}
+
+/// One field of an entity. Null columns inherit from the previous layer (base, then category chain, then shop).
+model FieldDef {
+  id          String        @id @default(cuid())
+  entityId    String
+  entity      EntityDef     @relation("EntityFields", fields: [entityId], references: [key], onDelete: Cascade)
+  categoryId  String?
+  category    Category?     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  tenantId    String?
+  tenant      Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// `base`, `category:<id>` or `tenant:<id>`. Anchors uniqueness because SQL treats nulls as distinct.
+  scopeKey    String
+  key         String
+  label       String?
+  type        FieldType?
+  builtIn     Boolean       @default(false)
+  required    Boolean?
+  visible     Boolean?
+  sortOrder   Int?
+  section     String?
+  showInList  Boolean?
+  refEntityId String?
+  refEntity   EntityDef?    @relation("FieldRefEntity", fields: [refEntityId], references: [key])
+  placeholder String?
+  help        String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  options     FieldOption[]
+
+  @@unique([entityId, key, scopeKey])
+  @@index([entityId])
+  @@index([categoryId])
+  @@index([tenantId])
+}
+
+model FieldOption {
+  id        String   @id @default(cuid())
+  fieldId   String
+  field     FieldDef @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  value     String
+  label     String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([fieldId, value])
+  @@index([fieldId])
+}
+
+/// Typed value of one field on one record. Multi-select stores one row per chosen option (`textValue`).
+model FieldValue {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entityKey   String
+  recordId    String
+  fieldKey    String
+  textValue   String    @default("")
+  numberValue Decimal?  @db.Decimal(14, 4)
+  dateValue   DateTime?
+  boolValue   Boolean?
+  refId       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([recordId, fieldKey, textValue])
+  @@index([tenantId, entityKey, fieldKey, textValue])
+  @@index([tenantId, entityKey, fieldKey, numberValue])
+  @@index([recordId])
+  @@index([refId])
+}
+
+/// A row of a custom entity. Native entities keep their own tables; `recordId` on FieldValue points at either.
+model EntityRecord {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entityId    String
+  entity      EntityDef @relation(fields: [entityId], references: [key], onDelete: Cascade)
+  title       String    @default("")
+  createdById String?
+  createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([tenantId, entityId])
+  @@index([createdById])
+}
+
+model TermDef {
+  key          String      @id
+  label        String
+  defaultValue String
+  sortOrder    Int         @default(0)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  values       TermValue[]
+}
+
+model TermValue {
+  id         String    @id @default(cuid())
+  termKey    String
+  term       TermDef   @relation(fields: [termKey], references: [key], onDelete: Cascade)
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  tenantId   String?
+  tenant     Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  scopeKey   String
+  value      String
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([termKey, scopeKey])
+  @@index([categoryId])
+  @@index([tenantId])
+}
+
+model VocabList {
+  key       String      @id
+  label     String
+  /// When true, the nearest layer that defines items replaces the whole list instead of merging by key.
+  replace   Boolean     @default(false)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  items     VocabItem[]
+}
+
+model VocabItem {
+  id         String    @id @default(cuid())
+  listKey    String
+  list       VocabList @relation(fields: [listKey], references: [key], onDelete: Cascade)
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  tenantId   String?
+  tenant     Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  scopeKey   String
+  key        String
+  label      String
+  tone       String?
+  minutes    Int?
+  sortOrder  Int       @default(0)
+  visible    Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([listKey, key, scopeKey])
+  @@index([categoryId])
+  @@index([tenantId])
+}
+
+model NavEntry {
+  id         String       @id @default(cuid())
+  placement  NavPlacement
+  categoryId String?
+  category   Category?    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  tenantId   String?
+  tenant     Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  scopeKey   String
+  key        String
+  parentKey  String?
+  kind       NavKind
+  moduleKey  String?
+  route      String?
+  label      String?
+  icon       String?
+  subtitle   String?
+  permission String?
+  sortOrder  Int?
+  visible    Boolean?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@unique([placement, key, scopeKey])
+  @@index([categoryId])
+  @@index([tenantId])
+}
+
+model ChecklistPreset {
+  id         String                @id @default(cuid())
+  categoryId String
+  category   Category              @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name       String
+  kind       String                @default("GENERIC")
+  sortOrder  Int                   @default(0)
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+  items      ChecklistPresetItem[]
+
+  @@unique([categoryId, name])
+  @@index([categoryId])
+}
+
+model ChecklistPresetItem {
+  id        String          @id @default(cuid())
+  presetId  String
+  preset    ChecklistPreset @relation(fields: [presetId], references: [id], onDelete: Cascade)
+  itemKey   String
+  label     String
+  sortOrder Int             @default(0)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@unique([presetId, itemKey])
+  @@index([presetId])
+}
+
+model ChecklistTemplateItem {
+  id         String            @id @default(cuid())
+  templateId String
+  template   ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  itemKey    String
+  label      String
+  sortOrder  Int               @default(0)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@unique([templateId, itemKey])
+  @@index([templateId])
+}
+
+model ChecklistAnswer {
+  id        String       @id @default(cuid())
+  runId     String
+  run       ChecklistRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  itemKey   String
+  label     String       @default("")
+  checked   Boolean      @default(false)
+  note      String?
+  sortOrder Int          @default(0)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([runId, itemKey])
+  @@index([runId])
+}
+
+/// Demo data for a category, in the same shape as FieldValue. `ref` is the name other rows point at.
+model SampleRecord {
+  id         String        @id @default(cuid())
+  categoryId String
+  category   Category      @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  entityKey  String
+  ref        String
+  sortOrder  Int           @default(0)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  values     SampleValue[]
+
+  @@unique([categoryId, ref])
+  @@index([categoryId, entityKey])
+}
+
+model SampleValue {
+  id          String       @id @default(cuid())
+  sampleId    String
+  sample      SampleRecord @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  fieldKey    String
+  textValue   String       @default("")
+  numberValue Decimal?     @db.Decimal(14, 4)
+  boolValue   Boolean?
+  /// Another SampleRecord.ref in the same category, for links such as an order line to a dish.
+  refSample   String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([sampleId, fieldKey, textValue])
+  @@index([sampleId])
+}
+
+model TenantPaymentSettings {
+  tenantId        String   @id
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  provider        String?
+  revolut         String?
+  satispay        String?
+  stripeSecretKey String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model TenantReminderSettings {
+  tenantId   String   @id
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  enabled    Boolean  @default(false)
+  daysBefore Int      @default(30)
+  autoEmail  Boolean  @default(true)
+  message    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model PlatformSetting {
+  key       String   @id
+  intValue  Int?
+  textValue String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

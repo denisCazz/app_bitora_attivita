@@ -127,14 +127,23 @@ export function PlanPreview({
                 ) : null}
               </View>
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                <Badge label={monthly(module.priceCents)} />
+                <Badge label={active ? `Poi ${monthly(module.priceCents)}, se lo tieni` : monthly(module.priceCents)} />
                 {module.score >= 3 ? <Badge tone="accent" label="Per quello che hai scelto" /> : null}
-                {active ? <Badge tone="success" label={`Gratis ${module.trialDays} giorni`} /> : null}
+                {active ? <Badge tone="success" label={`Gratis ${module.trialDays} giorni, senza carta`} /> : null}
               </View>
             </Card>
           </Animated.View>
         );
       })}
+
+      {trials.length ? (
+        <Card style={{ gap: 6, borderColor: theme.colors.accent, borderWidth: 1 }}>
+          <Text variant="heading">Come funzionano le prove</Text>
+          <Text variant="caption" muted>
+            Gratis e senza carta: oggi e alla fine non paghi nulla. Ogni prova finisce da sola e il modulo si blocca, senza rinnovo automatico; i dati restano salvati. Ti avvisiamo 2 giorni prima e, se ti è utile, ti abboni al prezzo indicato.
+          </Text>
+        </Card>
+      ) : null}
 
       {others.length ? (
         <Text variant="caption" muted>

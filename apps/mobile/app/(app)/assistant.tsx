@@ -2,11 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Backdrop, Button, Card, Glass, Pressy, Text, useTheme } from "@rapportini/ui";
+import { Backdrop, Button, Card, FLOATING_TAB_SPACE, Glass, Pressy, Text, useTheme } from "@rapportini/ui";
 import { useAiConsent } from "../../src/account";
 import { transcribeRecording, turnSpeech, useAssistant, type Entry } from "../../src/assistant";
 import { AiConsent } from "../../src/components/AiConsent";
@@ -14,6 +15,53 @@ import { LiveTalk } from "../../src/components/LiveTalk";
 import { goBack } from "../../src/navigation";
 import { useCanUse, useManifest } from "../../src/session";
 import { beginRecording, RECORDING_OPTIONS, useSpeaker } from "../../src/voice";
+
+function VoiceChatButton({
+  compact,
+  disabled,
+  onPress,
+}: {
+  compact?: boolean;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressy
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel="Chat vocale"
+      style={{
+        opacity: disabled ? 0.45 : 1,
+        borderRadius: 22,
+        alignSelf: compact ? "auto" : "stretch",
+        shadowColor: theme.colors.accent,
+        shadowOpacity: 0.45,
+        shadowRadius: 14,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 6,
+      }}
+    >
+      <View
+        style={{
+          height: compact ? 44 : 56,
+          paddingHorizontal: compact ? 14 : 20,
+          borderRadius: 22,
+          overflow: "hidden",
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+        }}
+      >
+        <LinearGradient colors={[theme.colors.accent, theme.colors.accentAlt]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+        <Ionicons name="mic" size={compact ? 18 : 22} color={theme.colors.accentInk} />
+        <Text style={{ color: theme.colors.accentInk, fontWeight: "800", fontSize: compact ? 15 : 17 }}>{compact ? "Voce" : "Chat vocale"}</Text>
+      </View>
+    </Pressy>
+  );
+}
 
 function Bubble({ entry }: { entry: Entry }) {
   const theme = useTheme();
@@ -64,7 +112,7 @@ function AssistantChat() {
   const manifest = useManifest().data;
   const owner = manifest ? `${manifest.user.id}:${manifest.tenant.id}` : null;
   const store = useAssistant();
-  const { busy, error, send, decide, reset, bind, reveal } = store;
+  const { busy, error, send, decide, reset, bind } = store;
   const current = Boolean(owner) && store.owner === owner;
   const entries = current ? store.entries : [];
   const pending = current ? store.pending : [];
@@ -72,9 +120,15 @@ function AssistantChat() {
   const [live, setLive] = useState(false);
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const recorder = useAudioRecorder(RECORDING_OPTIONS);
+  const focused = useRef(true);
+  const speakerRef = useRef(speaker);
+  const recorderRef = useRef(recorder);
+  speakerRef.current = speaker;
+  recorderRef.current = recorder;
   const orders = useCanUse("orders");
   const workOrders = useCanUse("work_orders");
 
@@ -90,6 +144,32 @@ function AssistantChat() {
   }, [owner, bind]);
 
   useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const show = Keyboard.addListener(showEvent, () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener(hideEvent, () => setKeyboardOpen(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      focused.current = true;
+      return () => {
+        focused.current = false;
+        speakerRef.current.stop();
+        setLive(false);
+        setRecording(false);
+        const active = recorderRef.current;
+        if (active.isRecording) void active.stop().catch(() => undefined);
+        void setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
+      };
+    }, []),
+  );
+
+  useEffect(() => {
     const timer = setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 60);
     return () => clearTimeout(timer);
   }, [entries.length, pending.length, busy]);
@@ -99,7 +179,14 @@ function AssistantChat() {
     setText("");
     speaker.stop();
     const turn = await send(value, { voice: aloud });
-    if (aloud && turn) await speaker.speak(turnSpeech(turn), () => reveal(turn.held));
+    if (!focused.current || !aloud || !turn) return;
+    void speaker.speak(turnSpeech(turn));
+  }
+
+  function leave() {
+    speaker.stop();
+    setLive(false);
+    goBack();
   }
 
   async function stopAndSend() {
@@ -108,14 +195,15 @@ function AssistantChat() {
     await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
     const uri = recorder.uri;
     if (!uri) throw new Error("Registrazione vuota, riprova.");
+    let heard = "";
     setTranscribing(true);
     try {
-      const heard = await transcribeRecording(uri);
-      if (heard) await submit(heard, true);
-      else setVoiceError("Non ho sentito niente, riprova.");
+      heard = await transcribeRecording(uri);
     } finally {
       setTranscribing(false);
     }
+    if (heard) await submit(heard, true);
+    else setVoiceError("Non ho sentito niente, riprova.");
   }
 
   async function startRecording() {
@@ -139,41 +227,35 @@ function AssistantChat() {
 
   const shownError = voiceError ?? (current ? error : null);
 
+  function openLive() {
+    speaker.stop();
+    setLive(true);
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.paper }}>
       <Backdrop />
-      <View style={{ paddingTop: insets.top + theme.space.sm, paddingHorizontal: theme.space.lg, paddingBottom: theme.space.sm, flexDirection: "row", alignItems: "center", gap: 12 }}>
-        <Pressy onPress={() => goBack()} accessibilityRole="button" accessibilityLabel="Indietro" hitSlop={10} scaleTo={0.9} style={{ borderRadius: 22 }}>
-          <Glass liquid interactive rounded={22} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
-            <Ionicons name="chevron-back" size={24} color={theme.colors.ink} />
-          </Glass>
-        </Pressy>
-        <View style={{ flex: 1 }}>
-          <Text variant="title">Assistente</Text>
-          <Text variant="caption" muted>
-            Risposte generate dall'IA, possono contenere errori. Chiedo conferma prima di modificare.
-          </Text>
-        </View>
-        {entries.length ? (
-          <Pressy onPress={reset} accessibilityRole="button" accessibilityLabel="Nuova conversazione" hitSlop={10}>
-            <Ionicons name="create-outline" size={24} color={theme.colors.inkSoft} />
+      <View style={{ paddingTop: insets.top + theme.space.sm, paddingHorizontal: theme.space.lg, paddingBottom: theme.space.sm, gap: 6 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <Pressy onPress={leave} accessibilityRole="button" accessibilityLabel="Indietro" hitSlop={10} scaleTo={0.9} style={{ borderRadius: 22 }}>
+            <Glass liquid interactive rounded={22} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="chevron-back" size={24} color={theme.colors.ink} />
+            </Glass>
           </Pressy>
-        ) : null}
-        <Pressy
-          onPress={() => {
-            speaker.stop();
-            setLive(true);
-          }}
-          disabled={!current}
-          accessibilityRole="button"
-          accessibilityLabel="Conversazione dal vivo"
-          style={{ width: 40, height: 40, borderRadius: 20, overflow: "hidden", alignItems: "center", justifyContent: "center" }}
-        >
-          <LinearGradient colors={["#2A1206", "#150B24"]} style={StyleSheet.absoluteFill} />
-          <Ionicons name="radio-outline" size={22} color="#F5B971" />
-        </Pressy>
+          <Text variant="title" style={{ flex: 1 }}>
+            Assistente
+          </Text>
+          {entries.length ? (
+            <Pressy onPress={reset} accessibilityRole="button" accessibilityLabel="Nuova conversazione" hitSlop={10}>
+              <Ionicons name="create-outline" size={24} color={theme.colors.inkSoft} />
+            </Pressy>
+          ) : null}
+          <VoiceChatButton compact disabled={!current} onPress={openLive} />
+        </View>
+        <Text variant="caption" muted>
+          Risposte generate dall'IA, possono contenere errori. Chiedo conferma prima di modificare.
+        </Text>
       </View>
-      {live ? <LiveTalk visible onClose={() => setLive(false)} /> : null}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ padding: theme.space.lg, gap: theme.space.md, flexGrow: 1 }} keyboardShouldPersistTaps="handled">
           {entries.length === 0 ? (
@@ -182,6 +264,7 @@ function AssistantChat() {
               <Text variant="heading" style={{ textAlign: "center" }}>
                 Scrivi o parla come faresti con un collega
               </Text>
+              <VoiceChatButton disabled={!current} onPress={openLive} />
               <View style={{ gap: theme.space.sm, alignSelf: "stretch" }}>
                 {examples.map((example) => (
                   <Pressy key={example} onPress={() => void submit(example)}>
@@ -235,7 +318,7 @@ function AssistantChat() {
             </Text>
           ) : null}
         </ScrollView>
-        <View style={{ paddingHorizontal: theme.space.lg, paddingTop: theme.space.sm, paddingBottom: Math.max(insets.bottom, theme.space.md) }}>
+        <View style={{ paddingHorizontal: theme.space.lg, paddingTop: theme.space.sm, paddingBottom: keyboardOpen ? theme.space.sm : insets.bottom + FLOATING_TAB_SPACE }}>
           <Glass rounded={28} style={{ flexDirection: "row", alignItems: "flex-end", gap: 6, padding: 6 }}>
             <TextInput
               value={text}
@@ -265,6 +348,7 @@ function AssistantChat() {
           </Glass>
         </View>
       </KeyboardAvoidingView>
+      {live ? <LiveTalk visible onClose={() => setLive(false)} /> : null}
     </View>
   );
 }

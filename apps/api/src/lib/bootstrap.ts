@@ -3,8 +3,20 @@ import { GENERIC_CATEGORY_KEY, PERMISSIONS, trialKeys, type ActivitySetup, type 
 import { HttpError } from "../errors";
 import { catalogNodes, resolvedCategory } from "./catalog";
 import { prisma } from "./prisma";
+import { ENTITY_KEY, writeFieldValues } from "./values";
 
 type Tx = Prisma.TransactionClient;
+
+function slug(label: string): string {
+  const key = label
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+  return key || "item";
+}
 
 function inDays(days: number): Date {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
@@ -37,16 +49,7 @@ export async function createTenantForUser(
         name: input.name,
         categoryId: category.id,
         needs,
-        branding: { logoUrl: null },
-        settings: {
-          terminology: setup?.terminology ?? {},
-          ...(setup
-            ? {
-                activity: setup.activity,
-                presets: { assetTypes: setup.assetTypes, scheduleKinds: setup.scheduleKinds, stations: setup.stations },
-              }
-            : {}),
-        },
+        activity: setup?.activity ?? null,
       },
     });
     const location = await tx.location.create({
@@ -68,26 +71,46 @@ export async function createTenantForUser(
     await tx.user.update({ where: { id: userId }, data: { activeTenantId: tenant.id } });
     await tx.tenantModule.createMany({
       data: [
-        ...category.modules.filter((module) => module.free).map((module) => ({ tenantId: tenant.id, moduleKey: module.key, enabled: true, config: {} })),
-        ...trials.map((module) => ({ tenantId: tenant.id, moduleKey: module.key, enabled: true, config: {}, trialEndsAt: inDays(module.trialDays) })),
+        ...category.modules.filter((module) => module.free).map((module) => ({ tenantId: tenant.id, moduleKey: module.key, enabled: true })),
+        ...trials.map((module) => ({ tenantId: tenant.id, moduleKey: module.key, enabled: true, trialEndsAt: inDays(module.trialDays) })),
       ],
     });
-    const fields = [...(category.presets.customFields ?? [])];
-    for (const field of setup?.customFields ?? []) {
-      if (!fields.some((existing) => existing.entity === field.entity && existing.key === field.key)) fields.push(field);
+    const scopeKey = `tenant:${tenant.id}`;
+    for (const [termKey, value] of Object.entries(setup?.terminology ?? {})) {
+      if (!value) continue;
+      await tx.termValue.create({ data: { tenantId: tenant.id, termKey, scopeKey, value } });
     }
-    for (const field of fields) {
-      await tx.customFieldDef.create({
-        data: { tenantId: tenant.id, entity: field.entity, key: field.key, label: field.label, type: field.type, options: field.options ?? [] },
-      });
+    if (setup) {
+      const vocab = [
+        ...setup.assetTypes.map((label, index) => ({ listKey: "asset_types", key: slug(label), label, sortOrder: index })),
+        ...setup.scheduleKinds.map((item, index) => ({ listKey: "schedule_kinds", key: item.key, label: item.label, tone: item.tone ?? null, minutes: item.minutes ?? null, sortOrder: index })),
+        ...setup.stations.map((item, index) => ({ listKey: "stations", key: item.key, label: item.label, sortOrder: index })),
+      ];
+      if (vocab.length) {
+        await tx.vocabItem.createMany({
+          data: vocab.map((item) => ({ tenantId: tenant.id, scopeKey, tone: null, minutes: null, ...item })),
+        });
+      }
+      for (const field of setup.customFields) {
+        const entityId = ENTITY_KEY[field.entity] ?? field.entity;
+        const created = await tx.fieldDef.create({
+          data: { tenantId: tenant.id, entityId, scopeKey, key: field.key, label: field.label, type: field.type, builtIn: false, visible: true, required: false },
+        });
+        if (field.options?.length) {
+          await tx.fieldOption.createMany({ data: field.options.map((option, index) => ({ fieldId: created.id, value: option, label: option, sortOrder: index })) });
+        }
+      }
     }
     const checklists = [...(category.presets.checklists ?? [])];
     for (const checklist of setup?.checklists ?? []) {
       if (!checklists.some((existing) => existing.name === checklist.name)) checklists.push(checklist);
     }
     for (const checklist of checklists) {
-      await tx.checklistTemplate.create({
-        data: { tenantId: tenant.id, name: checklist.name, kind: checklist.kind, items: checklist.items },
+      const created = await tx.checklistTemplate.create({
+        data: { tenantId: tenant.id, name: checklist.name, kind: checklist.kind },
+      });
+      await tx.checklistTemplateItem.createMany({
+        data: checklist.items.map((item, index) => ({ templateId: created.id, itemKey: item.id, label: item.label, sortOrder: index })),
       });
     }
     if (input.withSample && category.presets.sample) {
@@ -129,9 +152,9 @@ async function createSample(tx: Tx, ids: { tenantId: string; locationId: string;
         brand: preset.brand ?? null,
         model: preset.model ?? null,
         serialNumber: preset.serialNumber ?? null,
-        customFields: preset.customFields ?? {},
       },
     });
+    if (preset.customFields) await writeFieldValues(tenantId, "asset", asset.id, preset.customFields, tx);
     assetIds.push(asset.id);
   }
 

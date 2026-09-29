@@ -104,6 +104,42 @@ export function can(manifest: Manifest | undefined, permission: string) {
 }
 
 export function modulePermitted(manifest: Manifest | undefined, key: string) {
-  if (!manifest || !isModuleKey(key)) return false;
-  return hasPermission(manifest.role.permissions, MODULE_CODE[key].permission);
+  if (!manifest) return false;
+  const required = manifest.modules.find((module) => module.key === key)?.permission ?? (isModuleKey(key) ? MODULE_CODE[key].permission : `${key}.read`);
+  return hasPermission(manifest.role.permissions, required);
+}
+
+export function useEntity(key: string) {
+  return useManifest().data?.entities?.find((entity) => entity.key === key);
+}
+
+export function useFields(entityKey: string) {
+  return useEntity(entityKey)?.fields ?? [];
+}
+
+export function fieldText(fields: readonly { key: string; label: string; visible: boolean }[], key: string, fallback: string): string | null {
+  const field = fields.find((item) => item.key === key);
+  if (field && !field.visible) return null;
+  return field?.label || fallback;
+}
+
+export function useVocabList(key: string) {
+  const manifest = useManifest().data;
+  if (key === "schedule_kinds") return manifest?.tenant.vocab.scheduleKinds ?? [];
+  if (key === "stations") return manifest?.tenant.vocab.stations ?? [];
+  if (key === "dashboard_widgets") return manifest?.tenant.vocab.dashboard ?? [];
+  if (key === "asset_types") return manifest?.tenant.assetTypes ?? [];
+  const ledger = manifest?.tenant.vocab.ledger;
+  if (key === "ledger_income") return ledger?.income ?? [];
+  if (key === "ledger_expense") return ledger?.expense ?? [];
+  return [];
+}
+
+export function useMenu(placement: "TAB" | "MORE" | "SETTINGS" | "HOME_ACTIONS") {
+  return useManifest().data?.menus?.[placement] ?? [];
+}
+
+export function useTerm(key: string) {
+  const terms = useManifest().data?.tenant.terminology as Record<string, string> | undefined;
+  return terms?.[key] ?? key;
 }

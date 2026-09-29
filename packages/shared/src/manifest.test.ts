@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { categoryChain, planModules, resolveCategory, scoreModules, type CategoryNode, type ModuleDefRow, type NeedRow } from "./catalog";
-import { buildManifest, buildNavigation, moduleStatus } from "./manifest";
+import { buildManifest, buildNavigation, moduleStatus, renewsBilling } from "./manifest";
 import { MODULE_KEYS } from "./modules";
 import { PERMISSIONS } from "./permissions";
-import { demoTestModule } from "./store";
+import { demoTestModule, stripeTrialEnd } from "./store";
 
 const now = new Date("2026-09-25T12:00:00Z");
 
@@ -195,6 +195,35 @@ describe("moduleStatus", () => {
     const base = { key: "assets" as const, enabled: true, licensed: true, trialEndsAt: null, billingSource: "APPLE" as const };
     expect(moduleStatus(false, { ...base, licenseExpiresAt: "2026-10-01T00:00:00Z" }, now)).toBe("active");
     expect(moduleStatus(false, { ...base, licenseExpiresAt: "2026-09-01T00:00:00Z" }, now)).toBe("locked");
+  });
+});
+
+describe("renewsBilling", () => {
+  const base = { key: "assets" as const, enabled: true, licensed: true, trialEndsAt: null };
+
+  it("reads a card subscription as renewing until a cancellation date is set", () => {
+    expect(renewsBilling({ ...base, billingSource: "STRIPE", licenseExpiresAt: null }, now)).toBe(true);
+    expect(renewsBilling({ ...base, billingSource: "STRIPE", licenseExpiresAt: "2026-10-10T00:00:00Z" }, now)).toBe(false);
+  });
+
+  it("follows the store auto-renew flag", () => {
+    const store = { ...base, billingSource: "APPLE" as const, licenseExpiresAt: "2026-10-10T00:00:00Z" };
+    expect(renewsBilling({ ...store, autoRenews: true }, now)).toBe(true);
+    expect(renewsBilling({ ...store, autoRenews: false }, now)).toBe(false);
+  });
+
+  it("has nothing to renew for demo, trials or expired licences", () => {
+    expect(renewsBilling({ ...base, billingSource: "DEMO" }, now)).toBeNull();
+    expect(renewsBilling({ ...base, licensed: false, trialEndsAt: "2026-10-01T00:00:00Z" }, now)).toBeNull();
+    expect(renewsBilling({ ...base, billingSource: "GOOGLE", licenseExpiresAt: "2026-09-01T00:00:00Z" }, now)).toBeNull();
+  });
+});
+
+describe("stripeTrialEnd", () => {
+  it("defers the first card charge to the trial end only when Stripe accepts it", () => {
+    expect(stripeTrialEnd("2026-10-01T00:00:00Z", now)?.toISOString()).toBe("2026-10-01T00:00:00.000Z");
+    expect(stripeTrialEnd("2026-09-27T00:00:00Z", now)).toBeNull();
+    expect(stripeTrialEnd(null, now)).toBeNull();
   });
 });
 

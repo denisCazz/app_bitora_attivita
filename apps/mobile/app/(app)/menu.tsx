@@ -11,7 +11,7 @@ import { queryClient } from "../../src/api/query";
 import { Chip } from "../../src/components/Chip";
 import { QueryState } from "../../src/components/States";
 import { euro, stationPhrase, towardStation } from "../../src/format";
-import { can, useManifest, useVocab, vocabLabel } from "../../src/session";
+import { can, fieldText, useFields, useManifest, useVocab, vocabLabel } from "../../src/session";
 
 interface Modifier {
   id: string;
@@ -78,6 +78,7 @@ function itemMeta(item: Item, stations: Array<{ key: string; label: string }>) {
 }
 
 export default function MenuScreen() {
+  const menuFields = useFields("menu_item");
   const theme = useTheme();
   const manifest = useManifest();
   const writable = can(manifest.data, "menu.write");
@@ -286,10 +287,10 @@ export default function MenuScreen() {
       </QueryState>
       {writable ? <Fab onPress={openCreate} /> : null}
       <Sheet visible={Boolean(draft)} title={draft?.id ? "Modifica voce" : "Nuova voce"} onClose={closeSheet}>
-        <Input label="Nome" value={draft?.name ?? ""} onChangeText={(name) => setDraft((current) => (current ? { ...current, name } : current))} />
-        <Input label="Categoria" value={draft?.category ?? ""} onChangeText={(category) => setDraft((current) => (current ? { ...current, category } : current))} />
+        <Input label={fieldText(menuFields, "name", "Nome") ?? "Nome"} value={draft?.name ?? ""} onChangeText={(name) => setDraft((current) => (current ? { ...current, name } : current))} />
+        <Input label={fieldText(menuFields, "category", "Categoria") ?? "Categoria"} value={draft?.category ?? ""} onChangeText={(category) => setDraft((current) => (current ? { ...current, category } : current))} />
         <Input
-          label="Prezzo"
+          label={fieldText(menuFields, "price", "Prezzo") ?? "Prezzo"}
           keyboardType="decimal-pad"
           value={draft?.price ?? ""}
           onChangeText={(price) => setDraft((current) => (current ? { ...current, price } : current))}

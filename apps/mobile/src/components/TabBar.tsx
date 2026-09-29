@@ -26,18 +26,20 @@ export function TabBar({ items }: { items: NavItem[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const [width, setWidth] = useState(0);
-  const matched = items.findIndex((item) => isActive(item, pathname));
-  const activeIndex = matched >= 0 ? matched : Math.max(0, items.findIndex((item) => item.key === "more"));
+  const onAssistant = pathname.startsWith("/assistant");
+  const matched = onAssistant ? -1 : items.findIndex((item) => isActive(item, pathname));
+  const activeIndex = matched >= 0 ? matched : onAssistant ? -1 : Math.max(0, items.findIndex((item) => item.key === "more"));
   const slot = items.length ? width / items.length : 0;
   const x = useSharedValue(0);
 
   useEffect(() => {
+    if (activeIndex < 0 || slot <= 0) return;
     x.value = withSpring(activeIndex * slot, { damping: 20, stiffness: 240, mass: 0.8 });
   }, [activeIndex, slot, x]);
 
   const indicator = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
 
-  if (items.length === 0 || pathname.startsWith("/assistant")) return null;
+  if (items.length === 0) return null;
 
   const liquid = supportsLiquidGlass;
   const floatingShadow = liquid
@@ -45,12 +47,12 @@ export function TabBar({ items }: { items: NavItem[] }) {
     : { shadowColor: "#000", shadowOpacity: theme.dark ? 0.5 : 0.12, shadowRadius: 24, shadowOffset: { width: 0, height: 12 } };
 
   return (
-    <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: Math.max(insets.bottom - 6, 12), alignItems: "center" }}>
+    <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: Math.max(insets.bottom - 6, 12), alignItems: "center", zIndex: 20, elevation: 20 }}>
       <GlassGroup spacing={8} pointerEvents="box-none" style={{ width: "92%", maxWidth: 580, flexDirection: "row", alignItems: "center", gap: 10 }}>
         <View style={[{ flex: 1, borderRadius: 31 }, floatingShadow]}>
           <Glass liquid interactive intensity={70} rounded={31}>
             <View style={{ flexDirection: "row", padding: BAR_PADDING }} onLayout={(event) => setWidth(event.nativeEvent.layout.width - BAR_PADDING * 2)}>
-              {slot > 0 ? (
+              {slot > 0 && activeIndex >= 0 ? (
                 <Animated.View
                   pointerEvents="none"
                   style={[

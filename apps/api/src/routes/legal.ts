@@ -1,6 +1,7 @@
 import { LEGAL_VERSION } from "@rapportini/shared";
 import type { FastifyInstance } from "fastify";
 import { env } from "../env";
+import { platformText } from "../lib/platform";
 
 function escape(value: string) {
   return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -150,7 +151,8 @@ function termsPage() {
 <ul>
 <li>Il piano base è gratuito e include fino a 3 utenti. Moduli e utenti aggiuntivi sono a pagamento, al prezzo mostrato nell'app prima dell'acquisto (IVA secondo la normativa applicabile).</li>
 <li>Gli abbonamenti sono mensili e si rinnovano in automatico finché non li disdici. Puoi disdire in ogni momento: l'accesso resta fino alla fine del periodo già pagato e non ci sono rimborsi per i periodi parziali, salvo quanto previsto dalla legge.</li>
-<li>Le prove gratuite, se previste, durano i giorni indicati e si possono usare una sola volta per modulo.</li>
+<li>Le prove gratuite, se previste, durano i giorni indicati e si possono usare una sola volta per modulo. Le prove attivate in Bitora non richiedono carta: alla scadenza il modulo si blocca da solo, senza addebiti né rinnovo automatico, e i dati restano salvati.</li>
+<li>Se ti abboni con carta mentre una prova è in corso, il primo addebito avviene alla fine della prova quando mancano almeno 2 giorni; altrimenti avviene subito. Le prove offerte da App Store o Google Play al momento dell'abbonamento diventano a pagamento alla loro scadenza, salvo disdetta prima della fine, secondo le regole dello store.</li>
 <li>Gli acquisti fatti tramite App Store o Google Play seguono anche le condizioni di Apple o Google, e si gestiscono dalle impostazioni del tuo account su quelle piattaforme.</li>
 <li>Possiamo cambiare i prezzi con almeno 30 giorni di preavviso. Il nuovo prezzo vale dal rinnovo successivo e puoi disdire prima.</li>
 </ul>
@@ -205,9 +207,15 @@ function imprintPage() {
   );
 }
 
+async function withVersion(html: string) {
+  const version = await platformText("legal_version");
+  const date = new Date(`${version}T00:00:00Z`).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" });
+  return html.replaceAll(LEGAL_VERSION, version).replace(updated, date);
+}
+
 export async function legalRoutes(app: FastifyInstance) {
-  app.get("/legal", async (_request, reply) => reply.type("text/html; charset=utf-8").send(imprintPage()));
-  app.get("/legal/privacy", async (_request, reply) => reply.type("text/html; charset=utf-8").send(privacyPage()));
-  app.get("/legal/terms", async (_request, reply) => reply.type("text/html; charset=utf-8").send(termsPage()));
-  app.get("/legal/version", async () => ({ version: LEGAL_VERSION }));
+  app.get("/legal", async (_request, reply) => reply.type("text/html; charset=utf-8").send(await withVersion(imprintPage())));
+  app.get("/legal/privacy", async (_request, reply) => reply.type("text/html; charset=utf-8").send(await withVersion(privacyPage())));
+  app.get("/legal/terms", async (_request, reply) => reply.type("text/html; charset=utf-8").send(await withVersion(termsPage())));
+  app.get("/legal/version", async () => ({ version: await platformText("legal_version") }));
 }

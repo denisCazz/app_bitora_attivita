@@ -3,6 +3,7 @@ export * from "./permission-copy";
 export * from "./modules";
 export * from "./verticals";
 export * from "./catalog";
+export * from "./config";
 export * from "./manifest";
 export * from "./seats";
 export * from "./store";

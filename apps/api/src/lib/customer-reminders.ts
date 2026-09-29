@@ -37,8 +37,8 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-export function tenantReminderSettings(settings: unknown): ReminderSettings {
-  return readReminderSettings(record(settings).customerReminders);
+export function tenantReminderSettings(row: { enabled?: boolean; daysBefore?: number; autoEmail?: boolean; message?: string | null } | null | undefined): ReminderSettings {
+  return readReminderSettings(row ?? {});
 }
 
 export function publicReminderSettings(settings: ReminderSettings) {
@@ -46,12 +46,13 @@ export function publicReminderSettings(settings: ReminderSettings) {
 }
 
 export async function saveReminderSettings(tenantId: string, body: ReminderSettings) {
-  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } });
   if (!tenant) throw new HttpError(404, "Negozio non trovato");
   const next = readReminderSettings(body);
-  await prisma.tenant.update({
-    where: { id: tenantId },
-    data: { settings: { ...record(tenant.settings), customerReminders: { ...next } } as Prisma.InputJsonValue },
+  await prisma.tenantReminderSettings.upsert({
+    where: { tenantId },
+    create: { tenantId, enabled: next.enabled, daysBefore: next.daysBefore, autoEmail: next.autoEmail, message: next.message },
+    update: { enabled: next.enabled, daysBefore: next.daysBefore, autoEmail: next.autoEmail, message: next.message },
   });
   return publicReminderSettings(next);
 }
@@ -121,9 +122,9 @@ function present(schedule: ReminderSchedule, settings: ReminderSettings, busines
 export type PresentedReminder = ReturnType<typeof present>;
 
 async function shopOf(tenantId: string) {
-  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, settings: true } });
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, reminderSettings: true } });
   if (!tenant) throw new HttpError(404, "Negozio non trovato");
-  return { business: tenant.name, settings: tenantReminderSettings(tenant.settings) };
+  return { business: tenant.name, settings: tenantReminderSettings(tenant.reminderSettings) };
 }
 
 export async function listReminders(tenantId: string, now = new Date()) {
@@ -229,13 +230,13 @@ export async function emailDueReminders(now = new Date()) {
   if (!emailReady() || now.getTime() - lastEmailScan < EMAIL_SCAN_MS) return 0;
   lastEmailScan = now.getTime();
   const tenants = await prisma.tenant.findMany({
-    where: { settings: { path: ["customerReminders", "enabled"], equals: true } },
-    select: { id: true, name: true, settings: true },
+    where: { reminderSettings: { enabled: true, autoEmail: true } },
+    select: { id: true, name: true, reminderSettings: true },
   });
   const origin = payOrigin();
   let sent = 0;
   for (const tenant of tenants) {
-    const settings = tenantReminderSettings(tenant.settings);
+    const settings = tenantReminderSettings(tenant.reminderSettings);
     if (!settings.enabled || !settings.autoEmail) continue;
     const schedules = await prisma.schedule.findMany({
       where: {

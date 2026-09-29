@@ -21,6 +21,7 @@ import { refreshPayrollForShifts } from "../lib/payroll";
 import { prisma, tenantDb } from "../lib/prisma";
 import { tenantId } from "../plugins/auth";
 import { moduleGuard, permit } from "../plugins/guards";
+import { attachCustomFields, deleteFieldValues, writeFieldValues } from "../lib/values";
 import { inventoryLocation } from "./inventory";
 
 function idOf(request: { params: unknown }): string {
@@ -120,7 +121,9 @@ export async function hospitalityRoutes(app: FastifyInstance) {
   });
 
   app.get("/menu-items", { preHandler: [app.requireTenant, permit("menu.read"), moduleGuard("menu")] }, async (request) => {
-    return tenantDb(tenantId(request)).menuItem.findMany({ include: { modifiers: { include: { modifier: true } } }, orderBy: [{ category: "asc" }, { name: "asc" }] });
+    const id = tenantId(request);
+    const items = await tenantDb(id).menuItem.findMany({ include: { modifiers: { include: { modifier: true } } }, orderBy: [{ category: "asc" }, { name: "asc" }] });
+    return attachCustomFields(id, "menu_item", items);
   });
 
   app.post("/menu-items", { preHandler: [app.requireTenant, permit("menu.write"), moduleGuard("menu")] }, async (request) => {
@@ -128,8 +131,9 @@ export async function hospitalityRoutes(app: FastifyInstance) {
     const id = tenantId(request);
     const station = await stationFor(id, body.station);
     const item = await tenantDb(id).menuItem.create({
-      data: { tenantId: id, name: body.name, category: body.category, station, price: body.price, available: body.available ?? true, customFields: body.customFields ?? {} },
+      data: { tenantId: id, name: body.name, category: body.category, station, price: body.price, available: body.available ?? true },
     });
+    if (body.customFields) await writeFieldValues(id, "menu_item", item.id, body.customFields);
     if (body.modifierIds?.length) {
       await tenantDb(id).menuItemModifier.createMany({
         data: body.modifierIds.map((modifierId) => ({ tenantId: id, menuItemId: item.id, modifierId })),
@@ -154,7 +158,9 @@ export async function hospitalityRoutes(app: FastifyInstance) {
         await db.menuItemModifier.createMany({ data: modifierIds.map((modifierId) => ({ tenantId: id, menuItemId: itemId, modifierId })) });
       }
     }
-    return db.menuItem.update({ where: { id: itemId }, data: { name: body.name, category: body.category, station, price: body.price, available: body.available, customFields: body.customFields } });
+    const updated = await db.menuItem.update({ where: { id: itemId }, data: { name: body.name, category: body.category, station, price: body.price, available: body.available } });
+    if (body.customFields) await writeFieldValues(id, "menu_item", itemId, body.customFields);
+    return { ...updated, customFields: body.customFields ?? {} };
   });
 
   app.delete("/menu-items/:id", { preHandler: [app.requireTenant, permit("menu.write"), moduleGuard("menu")] }, async (request) => {
@@ -162,6 +168,7 @@ export async function hospitalityRoutes(app: FastifyInstance) {
     const db = tenantDb(tenantId(request));
     await must(db.menuItem.findFirst({ where: { id: itemId } }), "Piatto");
     await db.orderLine.updateMany({ where: { menuItemId: itemId }, data: { menuItemId: null } });
+    await deleteFieldValues(itemId);
     await db.menuItem.delete({ where: { id: itemId } });
     return { ok: true };
   });
@@ -184,8 +191,8 @@ export async function hospitalityRoutes(app: FastifyInstance) {
   });
 
   app.get("/menu-source", { preHandler: [app.requireTenant, permit("menu.write"), moduleGuard("menu")] }, async (request) => {
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId(request) }, select: { settings: true } });
-    return { url: menuSourceUrl(tenant?.settings) };
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId(request) }, select: { menuSourceUrl: true } });
+    return { url: menuSourceUrl(tenant?.menuSourceUrl) };
   });
 
   app.post("/menu-import", { preHandler: [app.requireTenant, permit("menu.write"), moduleGuard("menu")] }, async (request) => {

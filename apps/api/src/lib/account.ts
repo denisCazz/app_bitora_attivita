@@ -28,7 +28,12 @@ export async function ownedTenants(userId: string) {
 const TENANT_TABLES = [
   "location",
   "role",
-  "customFieldDef",
+  "fieldDef",
+  "fieldValue",
+  "entityRecord",
+  "termValue",
+  "vocabItem",
+  "navEntry",
   "tenantModule",
   "customer",
   "asset",
@@ -77,7 +82,7 @@ export async function exportAccount(userId: string) {
   for (const tenant of await ownedTenants(userId)) {
     const record = await prisma.tenant.findUnique({
       where: { id: tenant.id },
-      select: { id: true, name: true, needs: true, settings: true, branding: true, extraSeats: true, createdAt: true, category: { select: { key: true, label: true } } },
+      select: { id: true, name: true, needs: true, accent: true, logoUrl: true, activity: true, menuSourceUrl: true, extraSeats: true, createdAt: true, category: { select: { key: true, label: true } } },
     });
     const members = await prisma.membership.findMany({
       where: { tenantId: tenant.id },

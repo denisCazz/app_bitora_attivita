@@ -8,8 +8,12 @@ export const STORE_NAME = Platform.OS === "ios" ? "App Store" : "Google Play";
 
 export interface StoreOffer {
   productId: string;
+  /** Recurring monthly price, as the store will charge it. */
   displayPrice: string;
+  /** Free period this account actually gets on purchase, e.g. "1 mese". */
   freeTrial: string | null;
+  /** Discounted intro price this account actually gets, e.g. "1,99 € al mese per 3 mesi". */
+  introPrice: string | null;
   offerToken: string | null;
 }
 
@@ -85,27 +89,61 @@ export function onStoreChange(listener: () => void) {
   };
 }
 
+const PERIOD_NAMES: Record<string, [string, string]> = { day: ["giorno", "giorni"], week: ["settimana", "settimane"], month: ["mese", "mesi"], year: ["anno", "anni"] };
+
 function periodLabel(offer: SubscriptionOffer) {
   const count = (offer.period?.value ?? 1) * (offer.periodCount ?? 1);
-  const names: Record<string, [string, string]> = { day: ["giorno", "giorni"], week: ["settimana", "settimane"], month: ["mese", "mesi"], year: ["anno", "anni"] };
-  const [one, many] = names[offer.period?.unit ?? "day"] ?? ["giorno", "giorni"];
+  const [one, many] = PERIOD_NAMES[offer.period?.unit ?? "day"] ?? ["giorno", "giorni"];
   return `${count} ${count === 1 ? one : many}`;
 }
 
-export async function loadOffer(productId: string): Promise<StoreOffer | null> {
-  const iap = await connect();
-  const products = (await iap.fetchProducts({ skus: [productId], type: "subs" })) as ProductSubscription[] | null;
-  const product = products?.find((item) => item.id === productId);
-  if (!product) return null;
+function introPriceLabel(offer: SubscriptionOffer) {
+  const [unit] = PERIOD_NAMES[offer.period?.unit ?? "month"] ?? ["mese", "mesi"];
+  if (offer.paymentMode === "pay-up-front") return `${offer.displayPrice} per ${periodLabel(offer)}`;
+  return `${offer.displayPrice} al ${unit} per ${periodLabel(offer)}`;
+}
+
+/** Google Play lists the base plan as an offer with a single, endlessly recurring phase. */
+function isBasePlan(offer: SubscriptionOffer) {
+  const phases = offer.pricingPhasesAndroid?.pricingPhaseList ?? [];
+  return phases.length === 1;
+}
+
+/** Offers the store will really apply to this account: Google Play only returns eligible ones, Apple needs an explicit check. */
+async function eligibleIntroOffers(iap: Iap, product: ProductSubscription) {
   const offers = product.subscriptionOffers ?? [];
-  const trial = offers.find((offer) => offer.paymentMode === "free-trial");
-  const chosen = trial ?? offers.find((offer) => offer.paymentMode !== "free-trial") ?? offers[0];
+  if (Platform.OS !== "ios") return offers.filter((offer) => !isBasePlan(offer));
+  const intro = offers.filter((offer) => offer.type === "introductory");
+  if (!intro.length) return [];
+  const group = "subscriptionGroupIdIOS" in product ? product.subscriptionGroupIdIOS : null;
+  if (!group) return [];
+  const eligible = await iap.isEligibleForIntroOfferIOS(group).catch(() => false);
+  return eligible ? intro : [];
+}
+
+async function offerOf(iap: Iap, product: ProductSubscription): Promise<StoreOffer> {
+  const offers = product.subscriptionOffers ?? [];
+  const intro = await eligibleIntroOffers(iap, product);
+  const trial = intro.find((offer) => offer.paymentMode === "free-trial");
+  const discount = trial ? undefined : intro.find((offer) => offer.paymentMode === "pay-as-you-go" || offer.paymentMode === "pay-up-front");
+  const base = offers.find(isBasePlan);
+  const chosen = trial ?? discount ?? base ?? offers[0];
+  const recurring = Platform.OS === "android" ? chosen?.pricingPhasesAndroid?.pricingPhaseList.at(-1)?.formattedPrice : undefined;
   return {
-    productId,
-    displayPrice: product.displayPrice,
+    productId: product.id,
+    displayPrice: recurring ?? product.displayPrice,
     freeTrial: trial ? periodLabel(trial) : null,
+    introPrice: discount ? introPriceLabel(discount) : null,
     offerToken: chosen?.offerTokenAndroid ?? null,
   };
+}
+
+export async function loadOffers(productIds: string[]): Promise<Record<string, StoreOffer>> {
+  if (!productIds.length) return {};
+  const iap = await connect();
+  const products = ((await iap.fetchProducts({ skus: productIds, type: "subs" })) ?? []) as ProductSubscription[];
+  const entries = await Promise.all(products.filter((product) => productIds.includes(product.id)).map(async (product) => [product.id, await offerOf(iap, product)] as const));
+  return Object.fromEntries(entries);
 }
 
 export async function purchase(offer: StoreOffer, accountToken: string) {

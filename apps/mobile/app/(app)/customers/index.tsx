@@ -10,7 +10,7 @@ import { queryClient } from "../../../src/api/query";
 import { CustomFields } from "../../../src/components/CustomFields";
 import { QueryState } from "../../../src/components/States";
 import { t } from "../../../src/i18n";
-import { useManifest } from "../../../src/session";
+import { fieldText, useFields, useManifest } from "../../../src/session";
 
 interface Customer { id: string; name: string; phone?: string | null; city?: string | null }
 
@@ -31,6 +31,8 @@ export default function CustomersScreen() {
     },
   });
   const label = manifest.data?.tenant.terminology.customers ?? "Clienti";
+  const fields = useFields("customer");
+  const text = (key: string, fallback: string) => fieldText(fields, key, fallback);
 
   return (
     <Screen onRefresh={() => query.refetch()}>
@@ -48,12 +50,12 @@ export default function CustomersScreen() {
       </QueryState>
       <Fab onPress={() => setOpen(true)} />
       <Sheet visible={open} title={`Nuovo ${manifest.data?.tenant.terminology.customer.toLowerCase() ?? "cliente"}`} onClose={() => setOpen(false)}>
-        <Controller control={form.control} name="name" render={({ field, fieldState }) => <Input label="Nome" value={field.value} onChangeText={field.onChange} error={fieldState.error?.message} />} />
-        <Controller control={form.control} name="phone" render={({ field }) => <Input label="Telefono" value={field.value ?? ""} onChangeText={field.onChange} />} />
-        <Controller control={form.control} name="email" render={({ field, fieldState }) => <Input label="Email" value={field.value ?? ""} onChangeText={field.onChange} error={fieldState.error?.message} />} />
-        <Controller control={form.control} name="address" render={({ field }) => <Input label="Indirizzo" value={field.value ?? ""} onChangeText={field.onChange} />} />
-        <Controller control={form.control} name="city" render={({ field }) => <Input label="Città" value={field.value ?? ""} onChangeText={field.onChange} />} />
-        <Controller control={form.control} name="notes" render={({ field }) => <Input label="Note" value={field.value ?? ""} onChangeText={field.onChange} multiline />} />
+        <Controller control={form.control} name="name" render={({ field, fieldState }) => (text("name", "Nome") ? <Input label={text("name", "Nome")!} value={field.value} onChangeText={field.onChange} error={fieldState.error?.message} /> : <></>)} />
+        <Controller control={form.control} name="phone" render={({ field }) => (text("phone", "Telefono") ? <Input label={text("phone", "Telefono")!} value={field.value ?? ""} onChangeText={field.onChange} /> : <></>)} />
+        <Controller control={form.control} name="email" render={({ field, fieldState }) => (text("email", "Email") ? <Input label={text("email", "Email")!} value={field.value ?? ""} onChangeText={field.onChange} error={fieldState.error?.message} /> : <></>)} />
+        <Controller control={form.control} name="address" render={({ field }) => (text("address", "Indirizzo") ? <Input label={text("address", "Indirizzo")!} value={field.value ?? ""} onChangeText={field.onChange} /> : <></>)} />
+        <Controller control={form.control} name="city" render={({ field }) => (text("city", "Città") ? <Input label={text("city", "Città")!} value={field.value ?? ""} onChangeText={field.onChange} /> : <></>)} />
+        <Controller control={form.control} name="notes" render={({ field }) => (text("notes", "Note") ? <Input label={text("notes", "Note")!} value={field.value ?? ""} onChangeText={field.onChange} multiline /> : <></>)} />
         <CustomFields entity="CUSTOMER" fields={manifest.data?.customFields ?? []} values={custom} onChange={setCustom} />
         <Button label={t("save")} loading={save.isPending} onPress={form.handleSubmit((values) => save.mutate(values))} />
       </Sheet>

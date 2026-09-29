@@ -286,8 +286,8 @@ async function remindTrials(now: Date, directory: Map<string, Member[]>): Promis
         tenantId: module.tenantId,
         userId: member.userId,
         title: "Prova in scadenza",
-        body: `${label} scade il ${formatWhen(module.trialEndsAt)}`,
-        href: "/store",
+        body: `${label} scade il ${formatWhen(module.trialEndsAt)}. Poi si blocca da solo, senza addebiti: abbonati se vuoi tenerlo.`,
+        href: `/store/${module.moduleKey}`,
         dedupeKey: `trial:${module.moduleKey}`,
       });
     }

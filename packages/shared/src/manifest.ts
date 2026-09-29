@@ -1,5 +1,6 @@
 import { GENERIC_CATEGORY_KEY, needsFromModules, overlayVocab, type TenantActivityPresets } from "./activity";
 import { scoreModules, type CatalogModule, type CategoryPresets, type NeedView, type ResolvedCategory, type Vocab } from "./catalog";
+import type { ResolvedField, ResolvedNav } from "./config";
 import type { ModuleKey } from "./modules";
 import { hasPermission, type Permission } from "./permissions";
 import { EXTRA_SEAT_CENTS, INCLUDED_SEATS, seatMonthlyCents } from "./seats";
@@ -58,6 +59,9 @@ export interface Manifest {
   };
   navigation: NavItem[];
   customFields: CustomFieldDTO[];
+  entities: Array<{ key: string; label: string; labelPlural: string; icon: string; native: boolean; titleFieldKey: string; fields: ResolvedField[] }>;
+  menus: Record<ResolvedNav["placement"], ResolvedNav[]>;
+  permissions: Array<{ key: string; moduleKey: string; section: string; label: string; description: string }>;
 }
 
 export type ModuleStatus = "active" | "trial" | "off" | "locked";
@@ -77,11 +81,14 @@ export interface ManifestModule {
   trialEndsAt: string | null;
   billingSource: BillingSource | null;
   licenseExpiresAt: string | null;
+  /** True while a paid subscription renews by itself, false once cancelled (active until licenseExpiresAt), null when nothing is billed. */
+  renews: boolean | null;
   storeProductId: string;
   label: string;
   description: string;
   icon: string;
   route: string;
+  permission: string;
 }
 
 export interface ModuleState {
@@ -91,6 +98,15 @@ export interface ModuleState {
   trialEndsAt: Date | string | null;
   billingSource?: BillingSource | null;
   licenseExpiresAt?: Date | string | null;
+  /** Auto-renew flag of the App Store / Google Play subscription behind the license. */
+  autoRenews?: boolean | null;
+}
+
+export function renewsBilling(state: ModuleState | undefined, now = new Date()): boolean | null {
+  if (!state || !hasLicense(state, now)) return null;
+  if (state.billingSource === "STRIPE") return !state.licenseExpiresAt;
+  if (state.billingSource === "APPLE" || state.billingSource === "GOOGLE") return state.autoRenews ?? true;
+  return null;
 }
 
 export function hasLicense(state: ModuleState | undefined, now = new Date()): boolean {
@@ -140,7 +156,12 @@ export function buildManifest(input: {
   managesPeople?: boolean;
   moduleStates: readonly ModuleState[];
   customFields: CustomFieldDTO[];
+  entities?: Manifest["entities"];
+  menus?: Manifest["menus"];
+  permissions?: Manifest["permissions"];
   extraSeats?: number;
+  includedSeats?: number;
+  extraSeatCents?: number;
   now?: Date;
 }): Manifest {
   const { category } = input;
@@ -169,11 +190,13 @@ export function buildManifest(input: {
       trialEndsAt: state?.trialEndsAt ? new Date(state.trialEndsAt).toISOString() : null,
       billingSource: state?.licensed ? (state.billingSource ?? null) : null,
       licenseExpiresAt: state?.licensed && state.licenseExpiresAt ? new Date(state.licenseExpiresAt).toISOString() : null,
+      renews: renewsBilling(state, input.now),
       storeProductId: storeProductId(definition.key),
       label: definition.label,
       description: definition.description,
       icon: definition.icon,
       route: definition.route,
+      permission: definition.permission,
     };
   });
   const usable = category.modules.filter((definition) => isUsable(modules.find((module) => module.key === definition.key)!.status));
@@ -182,8 +205,32 @@ export function buildManifest(input: {
     return !module.free && hasLicense(state, input.now) && state?.billingSource !== "DEMO";
   });
   const extraSeats = Math.max(0, input.extraSeats ?? 0);
+  const includedSeats = input.includedSeats ?? INCLUDED_SEATS;
+  const extraSeatCents = input.extraSeatCents ?? EXTRA_SEAT_CENTS;
   const generic = category.key === GENERIC_CATEGORY_KEY;
-  const navigation = buildNavigation(usable, input.role.permissions).map((item) => ({
+  const fallbackNav = buildNavigation(usable, input.role.permissions);
+  const tabMenu = input.menus?.TAB?.filter((item) => item.key === "more" || item.kind !== "MODULE" || usable.some((module) => module.key === item.moduleKey)) ?? [];
+  const moreItem = tabMenu.find((item) => item.key === "more");
+  const moduleTabs = tabMenu.filter((item) => item.key !== "more").slice(0, 4);
+  const fromMenu = moduleTabs.length
+    ? [
+        ...moduleTabs.map((item) => ({
+          key: (item.moduleKey ?? item.key) as NavItem["key"],
+          label: item.label,
+          icon: item.icon,
+          route: item.route ?? (item.moduleKey ? usable.find((module) => module.key === item.moduleKey)?.route ?? `/x/${item.moduleKey}` : "/more"),
+          tab: true,
+        })),
+        {
+          key: "more" as const,
+          label: moreItem?.label ?? "Altro",
+          icon: moreItem?.icon ?? "ellipsis-horizontal",
+          route: moreItem?.route ?? "/more",
+          tab: true,
+        },
+      ]
+    : fallbackNav;
+  const navigation = fromMenu.map((item) => ({
     ...item,
     label: generic ? genericNavLabel(item.key, item.label, terminology) : item.label,
   }));
@@ -207,10 +254,13 @@ export function buildManifest(input: {
     plan: {
       paidModules: paid.length,
       monthlyCents: paid.reduce((sum, module) => sum + module.priceCents, 0) + seatMonthlyCents(extraSeats),
-      seats: { included: INCLUDED_SEATS, extra: extraSeats, priceCents: EXTRA_SEAT_CENTS },
+      seats: { included: includedSeats, extra: extraSeats, priceCents: extraSeatCents },
     },
     navigation,
     customFields: input.customFields,
+    entities: input.entities ?? [],
+    menus: input.menus ?? { TAB: [], MORE: [], SETTINGS: [], HOME_ACTIONS: [] },
+    permissions: input.permissions ?? [],
   };
 }
 

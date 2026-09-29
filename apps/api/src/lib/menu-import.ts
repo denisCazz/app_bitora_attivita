@@ -71,7 +71,7 @@ export async function applyMenuImport(tenantId: string, input: { url: string; hi
         }
       } else {
         const created = await tx.menuItem.create({
-          data: { tenantId, name: item.name, category: item.category, station, price: item.price, available: item.available, customFields: {} },
+          data: { tenantId, name: item.name, category: item.category, station, price: item.price, available: item.available },
         });
         if (links?.length) {
           await tx.menuItemModifier.createMany({ data: links.map((id) => ({ tenantId, menuItemId: created.id, modifierId: id })) });
@@ -84,21 +84,14 @@ export async function applyMenuImport(tenantId: string, input: { url: string; hi
       if (hidden.length) await tx.menuItem.updateMany({ where: { tenantId, id: { in: hidden } }, data: { available: false } });
     }
 
-    const tenant = await tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
-    const settings = settingsOf(tenant?.settings);
-    await tx.tenant.update({ where: { id: tenantId }, data: { settings: { ...settings, menuSourceUrl: input.url } } });
+    await tx.tenant.update({ where: { id: tenantId }, data: { menuSourceUrl: input.url } });
   });
 
   return { ok: true };
 }
 
-export function menuSourceUrl(settings: unknown): string | null {
-  const url = settingsOf(settings).menuSourceUrl;
-  return typeof url === "string" && url.trim() ? url : null;
-}
-
-function settingsOf(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : {};
+export function menuSourceUrl(value: string | null | undefined): string | null {
+  return value?.trim() ? value : null;
 }
 
 async function stationsOf(tenantId: string): Promise<Station[]> {

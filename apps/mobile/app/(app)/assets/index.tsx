@@ -14,7 +14,7 @@ import { CustomFields } from "../../../src/components/CustomFields";
 import { DateField } from "../../../src/components/DateField";
 import { QueryState } from "../../../src/components/States";
 import { fromLocalInput } from "../../../src/format";
-import { useManifest } from "../../../src/session";
+import { fieldText, useFields, useManifest } from "../../../src/session";
 
 interface Asset { id: string; name: string; type?: string | null; brand?: string | null; model?: string | null; serialNumber?: string | null; customer?: { name: string } | null }
 
@@ -26,6 +26,7 @@ export default function AssetsScreen() {
   const [customerQ, setCustomerQ] = useState("");
   const [installedAt, setInstalledAt] = useState("");
   const terms = manifest.data?.tenant.terminology;
+  const assetFields = useFields("asset");
   const types = manifest.data?.tenant.assetTypes ?? [];
   const query = useQuery({ queryKey: ["assets"], queryFn: () => http.get<Asset[]>("/assets") });
   const customers = useQuery({
@@ -74,8 +75,8 @@ export default function AssetsScreen() {
       </QueryState>
       <Fab onPress={() => setOpen(true)} />
       <Sheet visible={open} title={`Nuovo ${(terms?.asset ?? "impianto").toLowerCase()}`} onClose={() => setOpen(false)}>
-        <Controller control={form.control} name="name" render={({ field, fieldState }) => <Input label="Nome" value={field.value} onChangeText={field.onChange} error={fieldState.error?.message} />} />
-        <Controller control={form.control} name="type" render={({ field }) => <Input label="Tipo" value={field.value ?? ""} onChangeText={field.onChange} />} />
+        <Controller control={form.control} name="name" render={({ field, fieldState }) => (fieldText(assetFields, "name", "Nome") ? <Input label={fieldText(assetFields, "name", "Nome")!} value={field.value} onChangeText={field.onChange} error={fieldState.error?.message} /> : <></>)} />
+        <Controller control={form.control} name="type" render={({ field }) => (fieldText(assetFields, "type", "Tipo") ? <Input label={fieldText(assetFields, "type", "Tipo")!} value={field.value ?? ""} onChangeText={field.onChange} /> : <></>)} />
         {types.length ? (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             {types.map((type) => (
@@ -83,11 +84,11 @@ export default function AssetsScreen() {
             ))}
           </View>
         ) : null}
-        <Controller control={form.control} name="brand" render={({ field }) => <Input label="Marca" value={field.value ?? ""} onChangeText={field.onChange} />} />
-        <Controller control={form.control} name="model" render={({ field }) => <Input label="Modello" value={field.value ?? ""} onChangeText={field.onChange} />} />
-        <Controller control={form.control} name="serialNumber" render={({ field }) => <Input label="Matricola" value={field.value ?? ""} onChangeText={field.onChange} />} />
-        <DateField label="Installato il" value={installedAt} onChange={setInstalledAt} />
-        <Controller control={form.control} name="notes" render={({ field }) => <Input label="Note" value={field.value ?? ""} onChangeText={field.onChange} multiline />} />
+        <Controller control={form.control} name="brand" render={({ field }) => (fieldText(assetFields, "brand", "Marca") ? <Input label={fieldText(assetFields, "brand", "Marca")!} value={field.value ?? ""} onChangeText={field.onChange} /> : <></>)} />
+        <Controller control={form.control} name="model" render={({ field }) => (fieldText(assetFields, "model", "Modello") ? <Input label={fieldText(assetFields, "model", "Modello")!} value={field.value ?? ""} onChangeText={field.onChange} /> : <></>)} />
+        <Controller control={form.control} name="serialNumber" render={({ field }) => (fieldText(assetFields, "serialNumber", "Matricola") ? <Input label={fieldText(assetFields, "serialNumber", "Matricola")!} value={field.value ?? ""} onChangeText={field.onChange} /> : <></>)} />
+        {fieldText(assetFields, "installedAt", "Installato il") ? <DateField label={fieldText(assetFields, "installedAt", "Installato il")!} value={installedAt} onChange={setInstalledAt} /> : null}
+        <Controller control={form.control} name="notes" render={({ field }) => (fieldText(assetFields, "notes", "Note") ? <Input label={fieldText(assetFields, "notes", "Note")!} value={field.value ?? ""} onChangeText={field.onChange} multiline /> : <></>)} />
         <RecordPicker
           label={terms?.customer ?? "Cliente"}
           query={customerQ}

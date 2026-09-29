@@ -5,6 +5,7 @@ export interface StoreOffer {
   productId: string;
   displayPrice: string;
   freeTrial: string | null;
+  introPrice: string | null;
   offerToken: string | null;
 }
 
@@ -15,8 +16,8 @@ export function onStoreChange(_listener: () => void) {
   return () => undefined;
 }
 
-export async function loadOffer(_productId: string): Promise<StoreOffer | null> {
-  return null;
+export async function loadOffers(_productIds: string[]): Promise<Record<string, StoreOffer>> {
+  return {};
 }
 
 export async function purchase(_offer: StoreOffer, _accountToken: string): Promise<void> {

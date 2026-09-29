@@ -92,6 +92,15 @@ export default function ConsoleScreen() {
 
       <Card style={{ paddingVertical: 4 }}>
         <ListItem
+          title="Configurazione"
+          subtitle="Moduli custom, campi, vocabolari, menu, parole e piattaforma"
+          leading={<Ionicons name="options-outline" size={20} color={theme.colors.accent} />}
+          onPress={() => router.push("/(app)/admin/config")}
+        />
+      </Card>
+
+      <Card style={{ paddingVertical: 4 }}>
+        <ListItem
           title="Moduli e prezzi"
           subtitle={`${catalog.data?.modules.length ?? "…"} moduli nel catalogo`}
           leading={<Ionicons name="pricetags-outline" size={20} color={theme.colors.accent} />}

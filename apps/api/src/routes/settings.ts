@@ -1,5 +1,6 @@
-import { brandingSchema, customFieldDefSchema, moduleStatus, moduleToggleSchema, needsSchema, PERMISSIONS, roleSchema, terminologySchema } from "@rapportini/shared";
-import { categoryOfTenant } from "../lib/catalog";
+import { brandingSchema, customFieldDefSchema, moduleStatus, moduleToggleSchema, needsSchema, roleSchema, terminologySchema } from "@rapportini/shared";
+import { categoryOfTenant, invalidateCatalog } from "../lib/catalog";
+import { ENTITY_KEY } from "../lib/values";
 import type { FastifyInstance } from "fastify";
 import { HttpError, must, parseBody } from "../errors";
 import { prisma, tenantDb } from "../lib/prisma";
@@ -17,7 +18,10 @@ function idOf(request: { params: unknown }): string {
 export async function settingsRoutes(app: FastifyInstance) {
   const manage = [app.requireTenant, permit("settings.manage")];
 
-  app.get("/settings/permissions", { preHandler: manage }, async () => PERMISSIONS);
+  app.get("/settings/permissions", { preHandler: manage }, async () => {
+    const rows = await prisma.permissionDef.findMany({ orderBy: [{ sortOrder: "asc" }, { key: "asc" }] });
+    return rows.map((row) => row.key);
+  });
 
   app.post("/roles", { preHandler: manage }, async (request) => {
     const body = parseBody(roleSchema, request.body);
@@ -46,21 +50,42 @@ export async function settingsRoutes(app: FastifyInstance) {
   });
 
   app.get("/custom-fields", { preHandler: manage }, async (request) => {
-    return tenantDb(tenantId(request)).customFieldDef.findMany({ orderBy: [{ entity: "asc" }, { label: "asc" }] });
+    const rows = await prisma.fieldDef.findMany({
+      where: { tenantId: tenantId(request), builtIn: false },
+      include: { options: { orderBy: { sortOrder: "asc" } }, entity: true },
+      orderBy: [{ entityId: "asc" }, { label: "asc" }],
+    });
+    return rows.map(presentShopField);
   });
 
   app.post("/custom-fields", { preHandler: manage }, async (request) => {
     const body = parseBody(customFieldDefSchema, request.body);
     const id = tenantId(request);
-    return tenantDb(id).customFieldDef.create({
-      data: { tenantId: id, entity: body.entity, key: body.key, label: body.label, type: body.type, required: body.required ?? false, options: body.options ?? [] },
+    const entityId = ENTITY_KEY[body.entity] ?? body.entity;
+    const created = await prisma.fieldDef.create({
+      data: {
+        tenantId: id,
+        entityId,
+        scopeKey: `tenant:${id}`,
+        key: body.key,
+        label: body.label,
+        type: body.type,
+        required: body.required ?? false,
+        builtIn: false,
+        visible: true,
+        options: { create: (body.options ?? []).map((option, index) => ({ value: option, label: option, sortOrder: index })) },
+      },
+      include: { options: true, entity: true },
     });
+    invalidateCatalog();
+    return presentShopField(created);
   });
 
   app.delete("/custom-fields/:id", { preHandler: manage }, async (request) => {
-    const db = tenantDb(tenantId(request));
-    await must(db.customFieldDef.findFirst({ where: { id: idOf(request) } }), "Campo");
-    await db.customFieldDef.delete({ where: { id: idOf(request) } });
+    const id = tenantId(request);
+    const field = await must(prisma.fieldDef.findFirst({ where: { id: idOf(request), tenantId: id } }), "Campo");
+    await prisma.fieldDef.delete({ where: { id: field.id } });
+    invalidateCatalog();
     return { ok: true };
   });
 
@@ -104,8 +129,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     const body = parseBody(brandingSchema, request.body);
     const id = tenantId(request);
     const tenant = await must(prisma.tenant.findUnique({ where: { id } }), "Negozio");
-    const branding = { ...(tenant.branding as object), ...body };
-    return prisma.tenant.update({ where: { id }, data: { branding } });
+    return prisma.tenant.update({ where: { id }, data: { accent: body.accent ?? tenant.accent } });
   });
 
   app.post("/settings/logo", { preHandler: manage }, async (request) => {
@@ -118,9 +142,9 @@ export async function settingsRoutes(app: FastifyInstance) {
     if (data.length > LOGO_MAX_BYTES) throw new HttpError(413, "Il logo è troppo grande: massimo 6 MB");
     const id = tenantId(request);
     const tenant = await must(prisma.tenant.findUnique({ where: { id } }), "Negozio");
-    const previous = (tenant.branding as { logoUrl?: string | null }).logoUrl;
+    const previous = tenant.logoUrl;
     const logoUrl = await saveUpload(file.filename, mimeType, data);
-    await prisma.tenant.update({ where: { id }, data: { branding: { ...(tenant.branding as object), logoUrl } } });
+    await prisma.tenant.update({ where: { id }, data: { logoUrl } });
     if (previous) await removeUpload(previous).catch(() => undefined);
     return { logoUrl };
   });
@@ -128,8 +152,8 @@ export async function settingsRoutes(app: FastifyInstance) {
   app.delete("/settings/logo", { preHandler: manage }, async (request) => {
     const id = tenantId(request);
     const tenant = await must(prisma.tenant.findUnique({ where: { id } }), "Negozio");
-    const previous = (tenant.branding as { logoUrl?: string | null }).logoUrl;
-    await prisma.tenant.update({ where: { id }, data: { branding: { ...(tenant.branding as object), logoUrl: null } } });
+    const previous = tenant.logoUrl;
+    await prisma.tenant.update({ where: { id }, data: { logoUrl: null } });
     if (previous) await removeUpload(previous).catch(() => undefined);
     return { ok: true };
   });
@@ -145,11 +169,38 @@ export async function settingsRoutes(app: FastifyInstance) {
   app.patch("/settings/terminology", { preHandler: manage }, async (request) => {
     const body = parseBody(terminologySchema, request.body);
     const id = tenantId(request);
-    const tenant = await must(prisma.tenant.findUnique({ where: { id } }), "Negozio");
-    const settings = (tenant.settings ?? {}) as { terminology?: object };
-    return prisma.tenant.update({
-      where: { id },
-      data: { settings: { ...settings, terminology: { ...(settings.terminology ?? {}), ...body } } },
-    });
+    const scopeKey = `tenant:${id}`;
+    for (const [termKey, value] of Object.entries(body)) {
+      if (!value?.trim()) {
+        await prisma.termValue.deleteMany({ where: { tenantId: id, termKey } });
+        continue;
+      }
+      await prisma.termValue.upsert({
+        where: { termKey_scopeKey: { termKey, scopeKey } },
+        create: { tenantId: id, termKey, scopeKey, value },
+        update: { value },
+      });
+    }
+    invalidateCatalog();
+    return { ok: true };
   });
+}
+
+const LEGACY_ENTITY: Record<string, "CUSTOMER" | "ASSET" | "WORK_ORDER" | "PRODUCT"> = {
+  customer: "CUSTOMER",
+  asset: "ASSET",
+  work_order: "WORK_ORDER",
+  menu_item: "PRODUCT",
+};
+
+function presentShopField(field: { id: string; key: string; label: string | null; type: string | null; required: boolean | null; entity: { key: string }; options: Array<{ value: string }> }) {
+  return {
+    id: field.id,
+    entity: LEGACY_ENTITY[field.entity.key] ?? "ASSET",
+    key: field.key,
+    label: field.label ?? field.key,
+    type: field.type ?? "TEXT",
+    required: field.required ?? false,
+    options: field.options.map((option) => option.value),
+  };
 }

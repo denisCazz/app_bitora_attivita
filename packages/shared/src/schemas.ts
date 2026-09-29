@@ -468,7 +468,19 @@ export const moduleToggleSchema = z.object({
 
 export const trialSchema = z.object({ moduleKey: moduleKeySchema });
 
-export const checkoutSchema = z.object({ moduleKeys: z.array(moduleKeySchema).min(1).max(MODULE_KEYS.length) });
+/** Page of the web app Stripe sends the browser back to after checkout or the billing portal. */
+const returnUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .max(500)
+  .refine((value) => /^https?:\/\//i.test(value) && !value.includes("#"), "Indirizzo di ritorno non valido");
+
+export const checkoutSchema = z.object({ moduleKeys: z.array(moduleKeySchema).min(1).max(MODULE_KEYS.length), returnUrl: returnUrlSchema.optional() });
+
+export const checkoutConfirmSchema = z.object({ sessionId: z.string().trim().regex(/^cs_[A-Za-z0-9_]+$/, "Pagamento non valido").max(255) });
+
+export const portalSchema = z.object({ returnUrl: returnUrlSchema.optional() });
 
 export const storePurchaseSchema = z.object({
   platform: z.enum(["ios", "android"]),
@@ -480,6 +492,7 @@ export const storeSyncSchema = z.object({ purchases: z.array(storePurchaseSchema
 
 export const seatsSchema = z.object({
   extraSeats: z.number().int().min(0).max(100),
+  returnUrl: returnUrlSchema.optional(),
 });
 
 export const memberRoleSchema = z.object({

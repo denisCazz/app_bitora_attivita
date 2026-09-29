@@ -11,7 +11,7 @@ import { CircleButton, SectionLabel } from "../../src/components/Hero";
 import { ItemRow, MoveTabs, Stat, StockHero, formatQty, levelOf, parseQty, useLevelColor, type InventoryItem, type InventoryMovement } from "../../src/components/Inventory";
 import { QueryState } from "../../src/components/States";
 import { euro, when } from "../../src/format";
-import { can, useCanUse, useManifest } from "../../src/session";
+import { can, fieldText, useCanUse, useFields, useManifest } from "../../src/session";
 
 interface Location {
   id: string;
@@ -92,6 +92,7 @@ function FilterTabs({ value, counts, onChange }: { value: Filter; counts: Record
 }
 
 export default function InventoryScreen() {
+  const ingredientFields = useFields("ingredient");
   const theme = useTheme();
   const colorOf = useLevelColor();
   const manifest = useManifest();
@@ -493,7 +494,7 @@ export default function InventoryScreen() {
     const unitWord = draft.unit.trim() || "unità";
     return (
       <>
-        <Input label="Nome" value={draft.name} onChangeText={(name) => patchDraft({ name })} placeholder="Es. Farina 00" />
+        <Input label={fieldText(ingredientFields, "name", "Nome") ?? "Nome"} value={draft.name} onChangeText={(name) => patchDraft({ name })} placeholder="Es. Farina 00" />
         <View style={{ gap: 8 }}>
           <Text variant="label" muted>
             Unità di misura
@@ -504,7 +505,7 @@ export default function InventoryScreen() {
             ))}
             <Chip label="Altra" active={draft.customUnit} onPress={() => patchDraft({ customUnit: true, unit: draft.customUnit ? draft.unit : "" })} />
           </View>
-          {draft.customUnit ? <Input label="Unità" value={draft.unit} onChangeText={(unit) => patchDraft({ unit })} placeholder="Es. vaschetta" /> : null}
+          {draft.customUnit ? <Input label={fieldText(ingredientFields, "unit", "Unità") ?? "Unità"} value={draft.unit} onChangeText={(unit) => patchDraft({ unit })} placeholder="Es. vaschetta" /> : null}
         </View>
         <View style={{ flexDirection: "row", gap: 8 }}>
           <View style={{ flex: 1 }}>

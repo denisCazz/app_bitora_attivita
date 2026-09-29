@@ -36,7 +36,7 @@ export const PERMISSIONS = [
 
 export type Permission = (typeof PERMISSIONS)[number];
 
-export function hasPermission(permissions: readonly string[], required: Permission): boolean {
+export function hasPermission(permissions: readonly string[], required: string): boolean {
   return permissions.includes(required);
 }
 

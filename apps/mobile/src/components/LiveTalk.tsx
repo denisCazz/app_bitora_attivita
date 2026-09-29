@@ -3,7 +3,7 @@ import { setAudioModeAsync, useAudioRecorder, useAudioRecorderState } from "expo
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useRef, useState } from "react";
-import { Modal, StyleSheet, View } from "react-native";
+import { BackHandler, StyleSheet, View } from "react-native";
 import Animated, {
   Easing,
   cancelAnimation,
@@ -16,7 +16,7 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Pressy, Text } from "@rapportini/ui";
+import { FLOATING_TAB_SPACE, Pressy, Text } from "@rapportini/ui";
 import { spokenText, transcribeRecording, turnSpeech, useAssistant, voiceAnswer } from "../assistant";
 import { beginRecording, RECORDING_OPTIONS, useSpeaker } from "../voice";
 
@@ -32,7 +32,7 @@ const PALETTES: Record<Phase, [string, string, string]> = {
 };
 const LABELS: Record<Phase, string> = {
   listening: "Ti ascolto…",
-  thinking: "Ci penso…",
+  thinking: "Ci penso… tocca per fermarmi",
   speaking: "Parlo… tocca per interrompermi",
   paused: "In pausa: tocca il cerchio per parlare",
 };
@@ -130,6 +130,7 @@ export function LiveTalk({ visible, onClose }: { visible: boolean; onClose: () =
   const level = useSharedValue(0);
   const phaseRef = useRef<Phase>("paused");
   const alive = useRef(false);
+  const generation = useRef(0);
   const vad = useRef({ started: 0, lastLoud: 0, heard: false, floor: -45 });
 
   function go(next: Phase) {
@@ -156,30 +157,39 @@ export function LiveTalk({ visible, onClose }: { visible: boolean; onClose: () =
     if (recorder.isRecording) await recorder.stop().catch(() => undefined);
   }
 
+  function interrupt() {
+    generation.current += 1;
+    speaker.stop();
+    void stopRecorder();
+    go("paused");
+  }
+
   async function answer(text: string) {
+    const ticket = generation.current;
     setSaid("");
     const choice = useAssistant.getState().pending.length ? voiceAnswer(text) : null;
     const turn = choice ? await decide(choice === "approve", { voice: true }) : await send(text, { voice: true });
-    if (!alive.current) return;
+    if (!alive.current || generation.current !== ticket) return;
     const reply = turn ? spokenText(turn) : useAssistant.getState().error ?? "Non ci sono riuscito, riprova.";
     const speech = turn ? turnSpeech(turn) : { text: reply };
     await speaker.speak(speech, () => {
+      if (!alive.current || generation.current !== ticket) return;
       go("speaking");
       setSaid(reply);
-      useAssistant.getState().reveal(turn?.held ?? null);
     });
-    if (alive.current && phaseRef.current === "speaking") await listen();
+    if (alive.current && generation.current === ticket && phaseRef.current === "speaking") await listen();
   }
 
   async function finish() {
     if (phaseRef.current !== "listening") return;
+    const ticket = generation.current;
     go("thinking");
     level.value = withTiming(0, { duration: 200 });
     await stopRecorder();
     const uri = recorder.uri;
     try {
       const text = uri ? await transcribeRecording(uri) : "";
-      if (!alive.current) return;
+      if (!alive.current || generation.current !== ticket) return;
       if (!text) {
         await listen();
         return;
@@ -235,7 +245,10 @@ export function LiveTalk({ visible, onClose }: { visible: boolean; onClose: () =
   }, [visible]);
 
   function tapOrb() {
-    if (phase === "speaking") {
+    if (phase === "thinking") {
+      interrupt();
+    } else if (phase === "speaking") {
+      generation.current += 1;
       speaker.stop();
       go("paused");
       void listen();
@@ -247,15 +260,26 @@ export function LiveTalk({ visible, onClose }: { visible: boolean; onClose: () =
   }
 
   async function tapDecision(approve: boolean) {
+    const ticket = generation.current;
     speaker.stop();
     await stopRecorder();
+    if (!alive.current || generation.current !== ticket) return;
     go("thinking");
     setHeard(approve ? "Conferma" : "Annulla");
     await answer(approve ? "sì" : "no");
   }
 
+  useEffect(() => {
+    if (!visible) return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      onClose();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [visible, onClose]);
+
   return (
-    <Modal visible={visible} animationType="fade" presentationStyle="fullScreen" onRequestClose={onClose} statusBarTranslucent>
+    <View style={[StyleSheet.absoluteFill, { zIndex: 2, backgroundColor: "#050408" }]}>
       <View style={{ flex: 1, backgroundColor: "#050408" }}>
         <LinearGradient colors={["#050408", "#150B24", "#2A1206"]} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={StyleSheet.absoluteFill} />
         <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 20, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
@@ -271,7 +295,7 @@ export function LiveTalk({ visible, onClose }: { visible: boolean; onClose: () =
             <Orb phase={phase} level={level} />
           </Pressy>
         </View>
-        <View style={{ paddingHorizontal: 28, paddingBottom: insets.bottom + 28, gap: 14, minHeight: 220 }}>
+        <View style={{ paddingHorizontal: 28, paddingBottom: insets.bottom + FLOATING_TAB_SPACE, gap: 14, minHeight: 220 }}>
           <Text variant="label" style={{ color: EMBER, textAlign: "center", letterSpacing: 1 }}>
             {LABELS[phase]}
           </Text>
@@ -298,7 +322,7 @@ export function LiveTalk({ visible, onClose }: { visible: boolean; onClose: () =
           ) : null}
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 

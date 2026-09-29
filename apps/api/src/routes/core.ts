@@ -19,6 +19,7 @@ import { blankToNull, HttpError, must, num, parseBody } from "../errors";
 import { agenda, overlapsFor } from "../lib/agenda";
 import { categoryOfTenant } from "../lib/catalog";
 import { assertCustomFields } from "../lib/fields";
+import { attachCustomFields, deleteFieldValues, fieldsFor, presentChecklist, presentRun, readFieldMap, writeFieldValues } from "../lib/values";
 import { renderWorkOrderPdf } from "../lib/pdf";
 import { prisma, tenantDb, type TenantDb } from "../lib/prisma";
 import { removeUpload, saveUpload } from "../lib/storage";
@@ -31,11 +32,6 @@ function idOf(request: { params: unknown }): string {
 
 function search(request: { query: unknown }): string {
   return ((request.query as { q?: string }).q ?? "").trim();
-}
-
-function recordOf(value: unknown): Partial<Terminology> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  return value as Partial<Terminology>;
 }
 
 const SIGNATURE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -91,26 +87,33 @@ export async function coreRoutes(app: FastifyInstance) {
   });
 
   app.get("/customers", { preHandler: [app.requireTenant, permit("customers.read")] }, async (request) => {
+    const id = tenantId(request);
     const q = search(request);
-    return tenantDb(tenantId(request)).customer.findMany({
+    const rows = await tenantDb(id).customer.findMany({
       where: q ? { name: { contains: q, mode: "insensitive" } } : undefined,
       orderBy: { name: "asc" },
       take: 100,
     });
+    return attachCustomFields(id, "customer", rows);
   });
 
   app.post("/customers", { preHandler: [app.requireTenant, permit("customers.write")] }, async (request) => {
     const body = parseBody(customerSchema, request.body);
     const id = tenantId(request);
     const customFields = await assertCustomFields(id, "CUSTOMER", body.customFields);
-    return tenantDb(id).customer.create({
-      data: { tenantId: id, name: body.name, phone: blankToNull(body.phone), email: blankToNull(body.email), address: blankToNull(body.address), city: blankToNull(body.city), notes: blankToNull(body.notes), customFields },
+    const created = await tenantDb(id).customer.create({
+      data: { tenantId: id, name: body.name, phone: blankToNull(body.phone), email: blankToNull(body.email), address: blankToNull(body.address), city: blankToNull(body.city), notes: blankToNull(body.notes) },
     });
+    await writeFieldValues(id, "customer", created.id, customFields);
+    return { ...created, customFields };
   });
 
   app.get("/customers/:id", { preHandler: [app.requireTenant, permit("customers.read")] }, async (request) => {
-    const db = tenantDb(tenantId(request));
-    return must(db.customer.findFirst({ where: { id: idOf(request) }, include: { assets: true, workOrders: { orderBy: { createdAt: "desc" }, take: 20 } } }), "Cliente");
+    const id = tenantId(request);
+    const db = tenantDb(id);
+    const customer = await must(db.customer.findFirst({ where: { id: idOf(request) }, include: { assets: true, workOrders: { orderBy: { createdAt: "desc" }, take: 20 } } }), "Cliente");
+    const [withFields] = await attachCustomFields(id, "customer", [customer]);
+    return withFields;
   });
 
   app.patch("/customers/:id", { preHandler: [app.requireTenant, permit("customers.write")] }, async (request) => {
@@ -119,25 +122,31 @@ export async function coreRoutes(app: FastifyInstance) {
     const db = tenantDb(id);
     await must(db.customer.findFirst({ where: { id: idOf(request) } }), "Cliente");
     const customFields = body.customFields ? await assertCustomFields(id, "CUSTOMER", body.customFields) : undefined;
-    return db.customer.update({
+    const { customFields: _fields, ...rest } = body;
+    const updated = await db.customer.update({
       where: { id: idOf(request) },
-      data: { ...body, email: body.email === undefined ? undefined : blankToNull(body.email), customFields },
+      data: { ...rest, email: body.email === undefined ? undefined : blankToNull(body.email) },
     });
+    if (customFields) await writeFieldValues(id, "customer", updated.id, customFields);
+    return { ...updated, ...(customFields ? { customFields } : {}) };
   });
 
   app.delete("/customers/:id", { preHandler: [app.requireTenant, permit("customers.write")] }, async (request) => {
     const db = tenantDb(tenantId(request));
-    await must(db.customer.findFirst({ where: { id: idOf(request) } }), "Cliente");
-    await db.customer.delete({ where: { id: idOf(request) } }).catch(() => {
+    const customerId = idOf(request);
+    await must(db.customer.findFirst({ where: { id: customerId } }), "Cliente");
+    await deleteFieldValues(customerId);
+    await db.customer.delete({ where: { id: customerId } }).catch(() => {
       throw new HttpError(409, "Il cliente ha dati collegati");
     });
     return { ok: true };
   });
 
   app.get("/assets", { preHandler: [app.requireTenant, permit("assets.read"), moduleGuard("assets")] }, async (request) => {
+    const id = tenantId(request);
     const q = search(request);
     const customerId = (request.query as { customerId?: string }).customerId;
-    return tenantDb(tenantId(request)).asset.findMany({
+    const rows = await tenantDb(id).asset.findMany({
       where: {
         ...(customerId ? { customerId } : {}),
         ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { serialNumber: { contains: q, mode: "insensitive" } }, { model: { contains: q, mode: "insensitive" } }] } : {}),
@@ -146,13 +155,14 @@ export async function coreRoutes(app: FastifyInstance) {
       orderBy: { name: "asc" },
       take: 100,
     });
+    return attachCustomFields(id, "asset", rows);
   });
 
   app.post("/assets", { preHandler: [app.requireTenant, permit("assets.write"), moduleGuard("assets")] }, async (request) => {
     const body = parseBody(assetSchema, request.body);
     const id = tenantId(request);
     const customFields = await assertCustomFields(id, "ASSET", body.customFields);
-    return tenantDb(id).asset.create({
+    const created = await tenantDb(id).asset.create({
       data: {
         tenantId: id,
         customerId: body.customerId || null,
@@ -164,34 +174,42 @@ export async function coreRoutes(app: FastifyInstance) {
         serialNumber: blankToNull(body.serialNumber),
         installedAt: body.installedAt ? new Date(body.installedAt) : null,
         notes: blankToNull(body.notes),
-        customFields,
       },
     });
+    await writeFieldValues(id, "asset", created.id, customFields);
+    return { ...created, customFields };
   });
 
   app.get("/assets/:id", { preHandler: [app.requireTenant, permit("assets.read"), moduleGuard("assets")] }, async (request) => {
-    const db = tenantDb(tenantId(request));
-    return must(
+    const id = tenantId(request);
+    const db = tenantDb(id);
+    const asset = await must(
       db.asset.findFirst({
         where: { id: idOf(request) },
         include: { customer: true, workOrders: { orderBy: { createdAt: "desc" } }, schedules: { orderBy: { dueAt: "asc" } } },
       }),
       "Impianto",
     );
+    const [withFields] = await attachCustomFields(id, "asset", [asset]);
+    return withFields;
   });
 
   app.patch("/assets/:id", { preHandler: [app.requireTenant, permit("assets.write"), moduleGuard("assets")] }, async (request) => {
     const body = parseBody(assetSchema.partial(), request.body);
-    const db = tenantDb(tenantId(request));
+    const id = tenantId(request);
+    const db = tenantDb(id);
     await must(db.asset.findFirst({ where: { id: idOf(request) } }), "Impianto");
-    return db.asset.update({
+    const customFields = body.customFields ? await assertCustomFields(id, "ASSET", body.customFields) : undefined;
+    const { customFields: _fields, ...rest } = body;
+    const updated = await db.asset.update({
       where: { id: idOf(request) },
       data: {
-        ...body,
+        ...rest,
         installedAt: body.installedAt === undefined ? undefined : body.installedAt ? new Date(body.installedAt) : null,
-        customFields: body.customFields,
       },
     });
+    if (customFields) await writeFieldValues(id, "asset", updated.id, customFields);
+    return { ...updated, ...(customFields ? { customFields } : {}) };
   });
 
   const orderInclude = {
@@ -199,18 +217,20 @@ export async function coreRoutes(app: FastifyInstance) {
     asset: { include: { location: true } },
     assignee: { select: { id: true, name: true } },
     attachments: { orderBy: { createdAt: "asc" as const } },
-    checklistRuns: true,
+    checklistRuns: { include: { template: { select: { name: true } }, runAnswers: { orderBy: { sortOrder: "asc" as const } } } },
     stockMovements: { include: { part: true, location: true }, orderBy: { createdAt: "desc" as const } },
   } as const;
 
   app.get("/work-orders", { preHandler: [app.requireTenant, permit("work_orders.read"), moduleGuard("work_orders")] }, async (request) => {
+    const id = tenantId(request);
     const status = (request.query as { status?: "DRAFT" | "SCHEDULED" | "IN_PROGRESS" | "DONE" | "CANCELLED" }).status;
-    return tenantDb(tenantId(request)).workOrder.findMany({
+    const rows = await tenantDb(id).workOrder.findMany({
       where: status ? { status } : undefined,
       include: { customer: true, asset: { include: { location: true } }, assignee: { select: { id: true, name: true } } },
       orderBy: { scheduledAt: "asc" },
       take: 100,
     });
+    return attachCustomFields(id, "work_order", rows);
   });
 
   app.post("/work-orders", { preHandler: [app.requireTenant, permit("work_orders.write"), moduleGuard("work_orders")] }, async (request) => {
@@ -219,7 +239,7 @@ export async function coreRoutes(app: FastifyInstance) {
     const db = tenantDb(id);
     const customFields = await assertCustomFields(id, "WORK_ORDER", body.customFields);
     await assertSchedule(db, body.scheduleId);
-    return db.workOrder.create({
+    const created = await db.workOrder.create({
       data: {
         tenantId: id,
         customerId: body.customerId || null,
@@ -231,34 +251,41 @@ export async function coreRoutes(app: FastifyInstance) {
         status: body.status ?? "SCHEDULED",
         scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : null,
         durationMinutes: body.durationMinutes ?? (body.scheduledAt ? DEFAULT_SLOT_MINUTES : null),
-        customFields,
       },
       include: orderInclude,
     });
+    await writeFieldValues(id, "work_order", created.id, customFields);
+    return { ...created, customFields, checklistRuns: created.checklistRuns.map((run) => presentRun(run)) };
   });
 
   app.get("/work-orders/:id", { preHandler: [app.requireTenant, permit("work_orders.read"), moduleGuard("work_orders")] }, async (request) => {
-    return must(tenantDb(tenantId(request)).workOrder.findFirst({ where: { id: idOf(request) }, include: orderInclude }), "Intervento");
+    const id = tenantId(request);
+    const order = await must(tenantDb(id).workOrder.findFirst({ where: { id: idOf(request) }, include: orderInclude }), "Intervento");
+    const [withFields] = await attachCustomFields(id, "work_order", [order]);
+    return { ...withFields, checklistRuns: withFields.checklistRuns.map((run) => presentRun(run)) };
   });
 
   app.patch("/work-orders/:id", { preHandler: [app.requireTenant, permit("work_orders.write"), moduleGuard("work_orders")] }, async (request) => {
     const body = parseBody(workOrderSchema.partial(), request.body);
-    const db = tenantDb(tenantId(request));
+    const id = tenantId(request);
+    const db = tenantDb(id);
     const current = await must(db.workOrder.findFirst({ where: { id: idOf(request) } }), "Intervento");
     await assertSchedule(db, body.scheduleId);
     const completing = body.status === "DONE" && current.status !== "DONE";
     const completedAt = new Date();
+    const customFields = body.customFields ? await assertCustomFields(id, "WORK_ORDER", body.customFields) : undefined;
+    const { customFields: _fields, ...rest } = body;
     const updated = await db.workOrder.update({
       where: { id: idOf(request) },
       data: {
-        ...body,
+        ...rest,
         scheduleId: body.scheduleId === undefined ? undefined : body.scheduleId || null,
         scheduledAt: body.scheduledAt === undefined ? undefined : body.scheduledAt ? new Date(body.scheduledAt) : null,
         completedAt: body.status === "DONE" ? completedAt : undefined,
-        customFields: body.customFields,
       },
       include: orderInclude,
     });
+    if (customFields) await writeFieldValues(id, "work_order", updated.id, customFields);
     if (completing) await advanceSchedule(db, updated.id, completedAt);
     return updated;
   });
@@ -299,36 +326,40 @@ export async function coreRoutes(app: FastifyInstance) {
 
   app.get("/work-orders/:id/pdf", { preHandler: [app.requireTenant, permit("work_orders.read"), moduleGuard("work_orders")] }, async (request, reply) => {
     const id = tenantId(request);
-    const [found, tenant, fields] = await Promise.all([
-      must(
-        prisma.workOrder.findFirst({
-          where: { id: idOf(request), tenantId: id },
-          include: {
-            customer: true,
-            asset: { include: { location: true } },
-            assignee: { select: { name: true } },
-            attachments: true,
-            checklistRuns: { include: { template: { select: { name: true } } } },
-            stockMovements: { include: { part: true, location: true }, orderBy: { createdAt: "asc" } },
-          },
-        }),
-        "Intervento",
-      ),
-      prisma.tenant.findUnique({
-        where: { id },
-        include: { category: { select: { terminology: true } }, locations: { select: { address: true, city: true } } },
+    const found = await must(
+      prisma.workOrder.findFirst({
+        where: { id: idOf(request), tenantId: id },
+        include: {
+          customer: true,
+          asset: { include: { location: true } },
+          assignee: { select: { name: true } },
+          attachments: true,
+          checklistRuns: { include: { template: { select: { name: true } }, runAnswers: { orderBy: { sortOrder: "asc" } } } },
+          stockMovements: { include: { part: true, location: true }, orderBy: { createdAt: "asc" } },
+        },
       }),
-      prisma.customFieldDef.findMany({ where: { tenantId: id, entity: "WORK_ORDER" }, orderBy: { label: "asc" } }),
+      "Intervento",
+    );
+    const [tenant, category, values, tenantTerms] = await Promise.all([
+      prisma.tenant.findUnique({ where: { id }, include: { locations: { select: { address: true, city: true } } } }),
+      categoryOfTenant(id),
+      readFieldMap(id, "work_order", [found.id]),
+      prisma.termValue.findMany({ where: { tenantId: id } }),
     ]);
-    const settings = (tenant?.settings ?? {}) as { terminology?: Partial<Terminology> };
-    const terms = mergeTerminology(recordOf(tenant?.category.terminology), settings.terminology);
-    const branding = (tenant?.branding ?? {}) as { accent?: string; logoUrl?: string | null };
+    const overlay = Object.fromEntries(tenantTerms.map((row) => [row.termKey, row.value])) as Partial<Terminology>;
+    const terms = mergeTerminology(category.terminology, overlay);
+    const fields = (await fieldsFor(category.id, id, "work_order")).filter((field) => !field.builtIn);
+    const report = {
+      ...found,
+      customFields: values.get(found.id) ?? {},
+      checklistRuns: found.checklistRuns.map((run) => presentRun(run)),
+    };
     const place = tenant?.locations.length === 1 ? [tenant.locations[0]?.address, tenant.locations[0]?.city].filter(Boolean).join(", ") : "";
-    const pdf = await renderWorkOrderPdf(found, {
+    const pdf = await renderWorkOrderPdf(report, {
       shopName: tenant?.name ?? "Bitora",
       shopAddress: place || null,
-      logoUrl: typeof branding.logoUrl === "string" ? branding.logoUrl : null,
-      accent: typeof branding.accent === "string" ? branding.accent : DEFAULT_ACCENT,
+      logoUrl: tenant?.logoUrl ?? null,
+      accent: tenant?.accent || category.accent || DEFAULT_ACCENT,
       documentTitle: documentTitle(terms.workOrder),
       labels: { customer: terms.customer, asset: terms.asset, spareParts: terms.spareParts, technician: "Tecnico" },
       fields: fields.map((field) => ({ key: field.key, label: field.label, type: field.type })),
@@ -366,20 +397,33 @@ export async function coreRoutes(app: FastifyInstance) {
   });
 
   app.get("/checklist-templates", { preHandler: [app.requireTenant, permit("checklists.read"), moduleGuard("checklists")] }, async (request) => {
-    return tenantDb(tenantId(request)).checklistTemplate.findMany({ orderBy: { name: "asc" } });
+    const rows = await tenantDb(tenantId(request)).checklistTemplate.findMany({ include: { templateItems: { orderBy: { sortOrder: "asc" } } }, orderBy: { name: "asc" } });
+    return rows.map(presentChecklist);
   });
 
   app.post("/checklist-templates", { preHandler: [app.requireTenant, permit("checklists.manage"), moduleGuard("checklists")] }, async (request) => {
     const body = parseBody(checklistTemplateSchema, request.body);
     const id = tenantId(request);
-    return tenantDb(id).checklistTemplate.create({ data: { tenantId: id, name: body.name, kind: body.kind ?? "GENERIC", items: body.items } });
+    const created = await tenantDb(id).checklistTemplate.create({ data: { tenantId: id, name: body.name, kind: body.kind ?? "GENERIC" } });
+    await prisma.checklistTemplateItem.createMany({
+      data: body.items.map((item, index) => ({ templateId: created.id, itemKey: item.id, label: item.label, sortOrder: index })),
+    });
+    return presentChecklist({ ...created, templateItems: body.items.map((item, index) => ({ itemKey: item.id, label: item.label, sortOrder: index })) });
   });
 
   app.patch("/checklist-templates/:id", { preHandler: [app.requireTenant, permit("checklists.manage"), moduleGuard("checklists")] }, async (request) => {
     const body = parseBody(checklistTemplateSchema.partial(), request.body);
     const db = tenantDb(tenantId(request));
-    await must(db.checklistTemplate.findFirst({ where: { id: idOf(request) } }), "Checklist");
-    return db.checklistTemplate.update({ where: { id: idOf(request) }, data: body });
+    const current = await must(db.checklistTemplate.findFirst({ where: { id: idOf(request) } }), "Checklist");
+    const updated = await db.checklistTemplate.update({ where: { id: current.id }, data: { name: body.name, kind: body.kind } });
+    if (body.items) {
+      await prisma.checklistTemplateItem.deleteMany({ where: { templateId: current.id } });
+      await prisma.checklistTemplateItem.createMany({
+        data: body.items.map((item, index) => ({ templateId: current.id, itemKey: item.id, label: item.label, sortOrder: index })),
+      });
+    }
+    const items = await prisma.checklistTemplateItem.findMany({ where: { templateId: current.id }, orderBy: { sortOrder: "asc" } });
+    return presentChecklist({ ...updated, templateItems: items });
   });
 
   app.delete("/checklist-templates/:id", { preHandler: [app.requireTenant, permit("checklists.manage"), moduleGuard("checklists")] }, async (request) => {
@@ -390,22 +434,37 @@ export async function coreRoutes(app: FastifyInstance) {
   });
 
   app.get("/checklist-runs", { preHandler: [app.requireTenant, permit("checklists.read"), moduleGuard("checklists")] }, async (request) => {
-    return tenantDb(tenantId(request)).checklistRun.findMany({ orderBy: { createdAt: "desc" }, take: 40, include: { template: { select: { name: true } } } });
+    const rows = await tenantDb(tenantId(request)).checklistRun.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 40,
+      include: { template: { select: { name: true } }, runAnswers: { orderBy: { sortOrder: "asc" } } },
+    });
+    return rows.map(presentRun);
   });
 
   app.post("/checklist-runs", { preHandler: [app.requireTenant, permit("checklists.read"), moduleGuard("checklists")] }, async (request) => {
     const body = parseBody(checklistRunSchema, request.body);
     const id = tenantId(request);
-    return tenantDb(id).checklistRun.create({
+    const created = await tenantDb(id).checklistRun.create({
       data: {
         tenantId: id,
         templateId: body.templateId || null,
         workOrderId: body.workOrderId || null,
         assetId: body.assetId || null,
-        answers: body.answers,
         completedAt: body.completed ? new Date() : null,
       },
     });
+    await prisma.checklistAnswer.createMany({
+      data: body.answers.map((answer, index) => ({
+        runId: created.id,
+        itemKey: answer.id,
+        label: answer.label ?? "",
+        checked: answer.checked,
+        note: answer.note ?? null,
+        sortOrder: index,
+      })),
+    });
+    return presentRun({ ...created, runAnswers: body.answers.map((answer, index) => ({ itemKey: answer.id, label: answer.label ?? "", checked: answer.checked, note: answer.note ?? null, sortOrder: index })) });
   });
 
   app.get("/schedules", { preHandler: [app.requireTenant, permit("schedules.read"), moduleGuard("calendar")] }, async (request) => {

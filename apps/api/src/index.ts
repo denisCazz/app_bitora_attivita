@@ -1,3 +1,4 @@
+import { PERMISSIONS } from "@rapportini/shared";
 import { buildApp } from "./app";
 import { env } from "./env";
 import { prisma } from "./lib/prisma";
@@ -6,6 +7,9 @@ import { syncStripeCatalog } from "./lib/stripe";
 
 const app = await buildApp();
 const stopReminders = startReminders();
+const stored = new Set((await prisma.permissionDef.findMany({ select: { key: true } })).map((row) => row.key));
+const missing = PERMISSIONS.filter((key) => !stored.has(key));
+if (missing.length) app.log.error({ missing }, "Permessi nativi mancanti nel database");
 await app.listen({ port: env.port, host: "0.0.0.0" });
 void syncStripeCatalog().catch((error: unknown) => app.log.error(error, "Catalogo Stripe non aggiornato"));
 

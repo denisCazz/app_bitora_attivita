@@ -47,8 +47,10 @@ export default function HomeScreen() {
   const unread = (notices.data ?? []).filter((notice) => !notice.readAt).length;
   const [managing, setManaging] = useState(false);
   const homeActions = useHomeActions(manifest.data?.user.id, manifest.data?.tenant.id);
+  const homeMenu = manifest.data?.menus?.HOME_ACTIONS ?? [];
+  const homeKeys = new Set(homeMenu.map((item) => item.moduleKey ?? item.key));
   const candidates = (manifest.data?.modules ?? []).filter(
-    (module) => module.key !== "dashboard" && module.status !== "off" && modulePermitted(manifest.data, module.key),
+    (module) => module.key !== "dashboard" && module.status !== "off" && modulePermitted(manifest.data, module.key) && (homeKeys.size === 0 || homeKeys.has(module.key)),
   );
   const shown = homeActions.ready ? pickHomeActions(candidates, homeActions.selected) : candidates;
 

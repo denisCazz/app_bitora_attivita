@@ -11,7 +11,7 @@ import { TabBar } from "../../src/components/TabBar";
 import { TermsGate } from "../../src/components/TermsGate";
 import { t } from "../../src/i18n";
 import { can, useManifest } from "../../src/session";
-import { useStoreSync } from "../../src/billing";
+import { useCheckoutWatcher, useStoreSync } from "../../src/billing";
 import NetInfo from "@react-native-community/netinfo";
 
 export default function AppLayout() {
@@ -25,6 +25,7 @@ export default function AppLayout() {
   const refused = useOutbox((state) => state.failed[0]);
   const dismiss = useOutbox((state) => state.dismiss);
   useStoreSync(can(manifest.data, "settings.manage"));
+  useCheckoutWatcher();
 
   useEffect(() => {
     void refreshOutbox().then(() => flushQueue());

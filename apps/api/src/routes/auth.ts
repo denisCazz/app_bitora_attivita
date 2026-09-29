@@ -4,8 +4,6 @@ import {
   deleteAccountByEmailSchema,
   deleteAccountSchema,
   demoLoginSchema,
-  INCLUDED_SEATS,
-  LEGAL_VERSION,
   loginSchema,
   logoutSchema,
   passwordChangeSchema,
@@ -24,6 +22,7 @@ import { deleteAccount, exportAccount, isDemoEmail, ownedTenants } from "../lib/
 import { hashPassword, hashToken, issueSession, signPurpose, verifyPassword, verifyPurpose } from "../lib/auth";
 import { prepareDemoTenant } from "../lib/demo";
 import { manifestFor } from "../lib/manifest";
+import { platformInt, platformText } from "../lib/platform";
 import { prisma } from "../lib/prisma";
 import { appleRefreshToken, verifyIdentity } from "../lib/social";
 import { isPlatformAdmin } from "../lib/team";
@@ -89,7 +88,7 @@ export async function authRoutes(app: FastifyInstance) {
         name: body.name,
         passwordHash: await hashPassword(body.password),
         platformAdmin: isPlatformAdmin({ email, platformAdmin: false }),
-        termsVersion: LEGAL_VERSION,
+        termsVersion: await platformText("legal_version"),
         termsAcceptedAt: new Date(),
       },
     });
@@ -148,7 +147,7 @@ export async function authRoutes(app: FastifyInstance) {
             ...link,
             email: identity.email,
             name: body.name || identity.name || identity.email.split("@")[0]!,
-            termsVersion: accepted ? LEGAL_VERSION : null,
+            termsVersion: accepted ? await platformText("legal_version") : null,
             termsAcceptedAt: accepted ? new Date() : null,
           },
         });
@@ -187,14 +186,15 @@ export async function authRoutes(app: FastifyInstance) {
       const pending = await tx.invite.count({
         where: { tenantId: invite.tenantId, acceptedAt: null, expiresAt: { gt: new Date() }, id: { not: invite.id } },
       });
-      if (active + pending >= INCLUDED_SEATS + tenant.extraSeats) throw new HttpError(402, seatLimitMessage());
+      const included = await platformInt("included_seats");
+      if (active + pending >= included + tenant.extraSeats) throw new HttpError(402, seatLimitMessage());
       const created = await tx.user.create({
         data: {
           email,
           name: body.name,
           passwordHash: await hashPassword(body.password),
           activeTenantId: invite.tenantId,
-          termsVersion: LEGAL_VERSION,
+          termsVersion: await platformText("legal_version"),
           termsAcceptedAt: new Date(),
         },
       });
@@ -236,17 +236,17 @@ export async function authRoutes(app: FastifyInstance) {
         owner: ownedIds.has(item.tenantId),
       })),
       ownedTenants: owned.map((tenant) => ({ id: tenant.id, name: tenant.name, otherMembers: tenant.otherMembers })),
-      legalVersion: LEGAL_VERSION,
+      legalVersion: await platformText("legal_version"),
       termsAcceptedAt: user.termsAcceptedAt,
-      needsTerms: !isDemoEmail(user.email) && user.termsVersion !== LEGAL_VERSION,
+      needsTerms: !isDemoEmail(user.email) && user.termsVersion !== await platformText("legal_version"),
       aiConsentAt: isDemoEmail(user.email) ? null : user.aiConsentAt,
     };
   });
 
   app.post("/me/terms", { preHandler: app.requireUser }, async (request) => {
     const body = parseBody(termsAcceptSchema, request.body);
-    if (body.version !== LEGAL_VERSION) throw new HttpError(409, "I documenti sono stati aggiornati: ricarica e rileggili");
-    await prisma.user.update({ where: { id: request.auth!.userId }, data: { termsVersion: LEGAL_VERSION, termsAcceptedAt: new Date() } });
+    if (body.version !== await platformText("legal_version")) throw new HttpError(409, "I documenti sono stati aggiornati: ricarica e rileggili");
+    await prisma.user.update({ where: { id: request.auth!.userId }, data: { termsVersion: await platformText("legal_version"), termsAcceptedAt: new Date() } });
     return { ok: true };
   });
 

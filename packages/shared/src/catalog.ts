@@ -1,4 +1,4 @@
-import { isModuleKey, MODULE_CODE, type ModuleKey, type StockLocationKind } from "./modules";
+import { isModuleKey, isNativeModuleKey, MODULE_CODE, type ModuleKey, type StockLocationKind } from "./modules";
 import type { Permission } from "./permissions";
 import { ledgerCategoriesOf, type LedgerCategories } from "./reports";
 import { DEFAULT_ACCENT, mergeTerminology, type Terminology } from "./verticals";
@@ -16,6 +16,9 @@ export interface ModuleDefRow {
   requires: string[];
   sortOrder: number;
   active: boolean;
+  kind?: "NATIVE" | "CUSTOM";
+  route?: string;
+  readPermission?: string;
 }
 
 export interface CategoryModuleRow {
@@ -156,7 +159,7 @@ export interface CatalogModule {
   features: string[];
   icon: string;
   route: string;
-  permission: Permission;
+  permission: string;
   priceCents: number;
   trialDays: number;
   requires: ModuleKey[];
@@ -259,17 +262,19 @@ export function resolveCategory(chain: CategoryNode[], moduleDefs: ModuleDefRow[
   for (const definition of moduleDefs) {
     const key = definition.key;
     const row = merged.get(key);
-    if (!definition.active || !isModuleKey(key) || row?.hidden || (configured && !row)) continue;
+    const native = isNativeModuleKey(key);
+    if (!definition.active || (!native && definition.kind !== "CUSTOM") || row?.hidden || (configured && !row)) continue;
+    const code = native ? MODULE_CODE[key] : undefined;
     modules.push({
-      key,
+      key: key as ModuleKey,
       label: row?.label ?? definition.label,
       description: row?.description ?? definition.description,
       pitch: definition.pitch,
       details: definition.details ?? "",
       features: definition.features ?? [],
       icon: definition.icon,
-      route: MODULE_CODE[key].route,
-      permission: MODULE_CODE[key].permission,
+      route: definition.route || code?.route || `/x/${key}`,
+      permission: definition.readPermission || code?.permission || `${key}.read`,
       priceCents: definition.priceCents,
       trialDays: definition.trialDays,
       requires: definition.requires.filter(isModuleKey),

@@ -32,18 +32,13 @@ export interface StoredPayments extends PaymentConfigInput {
   stripeSecretKey: string | null;
 }
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-export function readPayments(settings: unknown): StoredPayments {
-  const payments = record(record(settings).payments);
-  const provider = payments.provider;
+export function readPayments(row: { provider?: string | null; revolut?: string | null; satispay?: string | null; stripeSecretKey?: string | null } | null | undefined): StoredPayments {
+  const provider = row?.provider;
   return {
     provider: provider === "STRIPE" || provider === "REVOLUT" || provider === "SATISPAY" ? provider : null,
-    revolut: typeof payments.revolut === "string" ? payments.revolut : null,
-    satispay: typeof payments.satispay === "string" ? payments.satispay : null,
-    stripeSecretKey: typeof payments.stripeSecretKey === "string" && payments.stripeSecretKey ? payments.stripeSecretKey : null,
+    revolut: row?.revolut ?? null,
+    satispay: row?.satispay ?? null,
+    stripeSecretKey: row?.stripeSecretKey || null,
   };
 }
 
@@ -58,10 +53,9 @@ export function publicPayments(config: StoredPayments) {
 }
 
 export async function savePayments(tenantId: string, body: { provider: PaymentProvider | null; revolut?: string | null; satispay?: string | null; stripeSecretKey?: string }) {
-  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { paymentSettings: true } });
   if (!tenant) throw new HttpError(404, "Negozio non trovato");
-  const settings = record(tenant.settings);
-  const current = readPayments(settings);
+  const current = readPayments(tenant.paymentSettings);
   let stripeSecretKey = body.stripeSecretKey === undefined ? current.stripeSecretKey : body.stripeSecretKey || null;
   if (body.stripeSecretKey) {
     const keyError = stripeKeyError(body.stripeSecretKey);
@@ -77,19 +71,10 @@ export async function savePayments(tenantId: string, body: { provider: PaymentPr
   };
   const error = paymentConfigError(next);
   if (error) throw new HttpError(400, error);
-  await prisma.tenant.update({
-    where: { id: tenantId },
-    data: {
-      settings: {
-        ...settings,
-        payments: {
-          provider: next.provider,
-          revolut: next.revolut,
-          satispay: next.satispay,
-          stripeSecretKey: next.stripeSecretKey,
-        },
-      } as Prisma.InputJsonValue,
-    },
+  await prisma.tenantPaymentSettings.upsert({
+    where: { tenantId },
+    create: { tenantId, provider: next.provider, revolut: next.revolut, satispay: next.satispay, stripeSecretKey: next.stripeSecretKey },
+    update: { provider: next.provider, revolut: next.revolut, satispay: next.satispay, stripeSecretKey: next.stripeSecretKey },
   });
   return publicPayments(next);
 }

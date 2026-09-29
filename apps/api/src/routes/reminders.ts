@@ -37,8 +37,8 @@ export async function reminderRoutes(app: FastifyInstance) {
   app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_request, body, done) => done(null, body));
 
   app.get("/settings/reminders", manage, async (request) => {
-    const tenant = await must(prisma.tenant.findUnique({ where: { id: tenantId(request) }, select: { settings: true } }), "Negozio");
-    return publicReminderSettings(tenantReminderSettings(tenant.settings));
+    const tenant = await must(prisma.tenant.findUnique({ where: { id: tenantId(request) }, select: { reminderSettings: true } }), "Negozio");
+    return publicReminderSettings(tenantReminderSettings(tenant.reminderSettings));
   });
 
   app.put("/settings/reminders", manage, async (request) => {

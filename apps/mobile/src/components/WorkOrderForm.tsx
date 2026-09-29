@@ -6,7 +6,7 @@ import { Button, Input, Sheet, Text } from "@rapportini/ui";
 import { http } from "../api/client";
 import { queryClient } from "../api/query";
 import { fromLocalInput } from "../format";
-import { useManifest } from "../session";
+import { fieldText, useFields, useManifest } from "../session";
 import { Chip } from "./Chip";
 import { CustomFields } from "./CustomFields";
 import { DateField } from "./DateField";
@@ -74,6 +74,16 @@ export function WorkOrderForm({
 }) {
   const manifest = useManifest();
   const terms = manifest.data?.tenant.terminology;
+  const fields = useFields("work_order");
+  const titleLabel = fieldText(fields, "title", "Titolo");
+  const notesLabel = fieldText(fields, "description", "Note");
+  const whenLabel = fieldText(fields, "scheduledAt", "Quando");
+  const statusLabel = fieldText(fields, "status", "Stato");
+  const customerLabel = fieldText(fields, "customerId", terms?.customer ?? "Cliente");
+  const assetLabel = fieldText(fields, "assetId", terms?.asset ?? "Impianto");
+  const assigneeLabel = fieldText(fields, "assigneeId", "Tecnico");
+  const statusOptions = fields.find((field) => field.key === "status")?.options ?? [];
+  const statuses = statusOptions.length ? statusOptions.map((option) => ({ id: option.value as Status, label: option.label })) : STATUSES;
   const [customerQ, setCustomerQ] = useState(names?.customer ?? "");
   const [assetQ, setAssetQ] = useState(names?.asset ?? "");
   const [assigneeQ, setAssigneeQ] = useState("");
@@ -133,17 +143,17 @@ export function WorkOrderForm({
 
   return (
     <View style={{ gap: 12 }}>
-      <Input label="Titolo" value={value.title} onChangeText={(title) => onChange({ ...value, title })} />
-      <Input label="Note" value={value.description} onChangeText={(description) => onChange({ ...value, description })} multiline />
-      <DateField label="Quando" mode="datetime" value={value.scheduledAt} onChange={(scheduledAt) => onChange({ ...value, scheduledAt })} />
-      <Text variant="label">Stato</Text>
+      {titleLabel ? <Input label={titleLabel} value={value.title} onChangeText={(title) => onChange({ ...value, title })} /> : null}
+      {notesLabel ? <Input label={notesLabel} value={value.description} onChangeText={(description) => onChange({ ...value, description })} multiline /> : null}
+      {whenLabel ? <DateField label={whenLabel} mode="datetime" value={value.scheduledAt} onChange={(scheduledAt) => onChange({ ...value, scheduledAt })} /> : null}
+      {statusLabel ? <Text variant="label">{statusLabel}</Text> : null}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        {STATUSES.map((status) => (
+        {statuses.map((status) => (
           <Chip key={status.id} label={status.label} active={value.status === status.id} onPress={() => onChange({ ...value, status: value.status === status.id ? "" : status.id })} />
         ))}
       </View>
       <RecordPicker
-        label={terms?.customer ?? "Cliente"}
+        label={customerLabel ?? terms?.customer ?? "Cliente"}
         query={customerQ}
         onQuery={setCustomerQ}
         options={(customers.data ?? []).map((customer) => ({ id: customer.id, title: customer.name, subtitle: customer.city ?? undefined }))}
@@ -154,7 +164,7 @@ export function WorkOrderForm({
       />
       {customers.error ? <Text>{customers.error.message}</Text> : null}
       <RecordPicker
-        label={terms?.asset ?? "Impianto"}
+        label={assetLabel ?? terms?.asset ?? "Impianto"}
         query={assetQ}
         onQuery={setAssetQ}
         options={(assets.data ?? []).map((asset) => ({ id: asset.id, title: asset.name, subtitle: [asset.type, asset.customer?.name].filter(Boolean).join(" · ") || undefined }))}
@@ -165,7 +175,7 @@ export function WorkOrderForm({
       />
       {assets.error ? <Text>{assets.error.message}</Text> : null}
       <RecordPicker
-        label="Tecnico"
+        label={assigneeLabel ?? "Tecnico"}
         query={assigneeQ}
         onQuery={setAssigneeQ}
         options={people.map((member) => ({ id: member.userId, title: member.name, subtitle: member.roleName }))}

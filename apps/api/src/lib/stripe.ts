@@ -1,4 +1,4 @@
-import { EXTRA_SEAT_CENTS } from "@rapportini/shared";
+import { platformInt } from "./platform";
 import { randomBytes } from "node:crypto";
 import Stripe from "stripe";
 import { env } from "../env";
@@ -94,9 +94,10 @@ export async function ensureModulePrice(module: { key: string; label: string; de
 export async function extraSeatPriceId() {
   const stripe = stripeClient();
   if (!stripe) return null;
+  const extraSeatCents = await platformInt("extra_seat_cents");
   const listed = await stripe.prices.list({ lookup_keys: [EXTRA_SEAT_LOOKUP], active: true, limit: 1 });
   const current = listed.data[0];
-  if (current && current.unit_amount === EXTRA_SEAT_CENTS && current.currency === "eur") return current.id;
+  if (current && current.unit_amount === extraSeatCents && current.currency === "eur") return current.id;
 
   const productId = typeof current?.product === "string" ? current.product : current?.product?.id;
   const product =
@@ -112,7 +113,7 @@ export async function extraSeatPriceId() {
   const price = await stripe.prices.create({
     product,
     currency: "eur",
-    unit_amount: EXTRA_SEAT_CENTS,
+    unit_amount: extraSeatCents,
     recurring: { interval: "month" },
     lookup_key: EXTRA_SEAT_LOOKUP,
     transfer_lookup_key: true,

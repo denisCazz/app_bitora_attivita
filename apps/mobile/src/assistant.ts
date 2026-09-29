@@ -31,7 +31,6 @@ export interface Turn {
   reply: string | null;
   pending: PendingAction[];
   speech: string | null;
-  held: Entry | null;
 }
 
 interface ChatOptions {
@@ -53,7 +52,6 @@ interface AssistantState {
   bind: (owner: string) => void;
   send: (text: string, options?: ChatOptions) => Promise<Turn | null>;
   decide: (approve: boolean, options?: ChatOptions) => Promise<Turn | null>;
-  reveal: (entry: Entry | null) => void;
   reset: () => void;
 }
 
@@ -75,11 +73,10 @@ export const useAssistant = create<AssistantState>((set, get) => {
         text: action.ok ? action.summary : `${action.summary}: ${action.error ?? "non riuscito"}`,
       }));
       const reply: Entry | null = result.reply?.trim() ? { id: nextId(), kind: "assistant", text: result.reply.trim() } : null;
-      const held = options.voice && result.speech ? reply : null;
-      if (reply && !held) added.push(reply);
+      if (reply) added.push(reply);
       set((state) => ({ messages: result.messages, pending: result.pending, entries: [...state.entries, ...added] }));
       if (result.done.some((action) => action.ok)) void queryClient.invalidateQueries();
-      return { reply: reply?.text ?? null, pending: result.pending, speech: result.speech, held };
+      return { reply: reply?.text ?? null, pending: result.pending, speech: result.speech };
     } catch (error) {
       if (get().owner === owner) set({ error: error instanceof Error ? error.message : "Assistente non raggiungibile" });
       return null;
@@ -104,10 +101,6 @@ export const useAssistant = create<AssistantState>((set, get) => {
       if (get().busy || !get().pending.length) return null;
       set({ pending: [] });
       return chat({ decision: approve ? "approve" : "reject" }, options);
-    },
-    reveal: (entry) => {
-      if (!entry || get().entries.some((item) => item.id === entry.id)) return;
-      set((state) => ({ entries: [...state.entries, entry] }));
     },
     reset: () => set(EMPTY),
   };

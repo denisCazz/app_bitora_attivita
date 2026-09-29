@@ -50,8 +50,8 @@ export async function paymentRoutes(app: FastifyInstance) {
   const manage = { preHandler: [app.requireTenant, permit("settings.manage")] };
 
   app.get("/settings/payments", manage, async (request) => {
-    const tenant = await must(prisma.tenant.findUnique({ where: { id: tenantId(request) }, select: { settings: true } }), "Negozio");
-    return publicPayments(readPayments(tenant.settings));
+    const tenant = await must(prisma.tenant.findUnique({ where: { id: tenantId(request) }, select: { paymentSettings: true } }), "Negozio");
+    return publicPayments(readPayments(tenant.paymentSettings));
   });
 
   app.put("/settings/payments", manage, async (request) => {
@@ -63,10 +63,10 @@ export async function paymentRoutes(app: FastifyInstance) {
     const id = tenantId(request);
     const db = tenantDb(id);
     const [tenant, rows] = await Promise.all([
-      must(prisma.tenant.findUnique({ where: { id }, select: { name: true, settings: true } }), "Negozio"),
+      must(prisma.tenant.findUnique({ where: { id }, select: { name: true, paymentSettings: true } }), "Negozio"),
       db.workOrderPayment.findMany({ include, orderBy: { updatedAt: "desc" }, take: 200 }),
     ]);
-    const config = readPayments(tenant.settings);
+    const config = readPayments(tenant.paymentSettings);
     const origin = originOf(request);
     return rows.map((row) => presentPayment(row, config, tenant.name, origin));
   });
@@ -99,7 +99,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     const id = tenantId(request);
     const db = tenantDb(id);
     const workOrder = await must(db.workOrder.findFirst({ where: { id: body.workOrderId }, select: { id: true, customerId: true, title: true } }), "Intervento");
-    const tenant = await must(prisma.tenant.findUnique({ where: { id }, select: { name: true, settings: true } }), "Negozio");
+    const tenant = await must(prisma.tenant.findUnique({ where: { id }, select: { name: true, paymentSettings: true } }), "Negozio");
     try {
       const row = await prisma.workOrderPayment.create({
         data: {
@@ -112,7 +112,7 @@ export async function paymentRoutes(app: FastifyInstance) {
         },
         include,
       });
-      return presentPayment(row, readPayments(tenant.settings), tenant.name, originOf(request));
+      return presentPayment(row, readPayments(tenant.paymentSettings), tenant.name, originOf(request));
     } catch (error) {
       if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
         throw new HttpError(409, "Questo intervento ha già un pagamento");
@@ -131,7 +131,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       { amount: body.amount, paidAmount: body.paidAmount, status: body.status },
     );
     if ("error" in next) throw new HttpError(400, next.error);
-    const tenant = await must(prisma.tenant.findUnique({ where: { id }, select: { name: true, settings: true } }), "Negozio");
+    const tenant = await must(prisma.tenant.findUnique({ where: { id }, select: { name: true, paymentSettings: true } }), "Negozio");
     const collecting = next.status === "PARTIAL" || next.status === "PAID";
     const updated = await db.workOrderPayment.update({
       where: { id: row.id },
@@ -158,7 +158,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       title: updated.workOrder.title,
     });
     const fresh = await must(db.workOrderPayment.findFirst({ where: { id: updated.id }, include }), "Pagamento");
-    return presentPayment(fresh, readPayments(tenant.settings), tenant.name, originOf(request));
+    return presentPayment(fresh, readPayments(tenant.paymentSettings), tenant.name, originOf(request));
   });
 
   app.post("/payments/:id/sent", write, async (request) => {
@@ -188,12 +188,12 @@ export async function paymentRoutes(app: FastifyInstance) {
   app.post("/pay/:token/checkout", async (request, reply) => {
     const payment = await prisma.workOrderPayment.findUnique({
       where: { token: tokenOf(request) },
-      include: { workOrder: { select: { title: true } }, tenant: { select: { settings: true } } },
+      include: { workOrder: { select: { title: true } }, tenant: { select: { paymentSettings: true } } },
     });
     if (!payment || payment.status === "CANCELLED" || payment.status === "PAID") {
       return reply.redirect(payLink(originOf(request), tokenOf(request)), 303);
     }
-    const config = readPayments(payment.tenant.settings);
+    const config = readPayments(payment.tenant.paymentSettings);
     if (config.provider !== "STRIPE" || !config.stripeSecretKey) throw new HttpError(409, "Pagamento con carta non configurato");
     const remainder = roundEuros(Math.max(0, num(payment.amount) - num(payment.paidAmount)));
     if (belowCardMinimum(remainder)) throw new HttpError(400, `L'importo minimo con carta è ${STRIPE_MIN_EUROS.toLocaleString("it-IT")} €`);
@@ -230,10 +230,10 @@ export async function paymentRoutes(app: FastifyInstance) {
     if (!sessionId) return reply.redirect(payLink(originOf(request), token), 303);
     const payment = await prisma.workOrderPayment.findUnique({
       where: { token },
-      include: { workOrder: { select: { title: true } }, tenant: { select: { settings: true, name: true } } },
+      include: { workOrder: { select: { title: true } }, tenant: { select: { paymentSettings: true, name: true } } },
     });
     if (!payment) return reply.code(404).type("text/html; charset=utf-8").send(missingPage());
-    const config = readPayments(payment.tenant.settings);
+    const config = readPayments(payment.tenant.paymentSettings);
     if (!config.stripeSecretKey) return reply.redirect(payLink(originOf(request), token), 303);
     let paid = payment.status === "PAID";
     if (!paid) {
@@ -262,7 +262,7 @@ export async function paymentRoutes(app: FastifyInstance) {
 async function loadPayPage(token: string) {
   const payment = await prisma.workOrderPayment.findUnique({
     where: { token },
-    include: { workOrder: { select: { title: true } }, tenant: { select: { name: true, settings: true } } },
+    include: { workOrder: { select: { title: true } }, tenant: { select: { name: true, paymentSettings: true } } },
   });
   if (!payment) return null;
   const remainder = roundEuros(Math.max(0, num(payment.amount) - num(payment.paidAmount)));
@@ -273,7 +273,7 @@ async function loadPayPage(token: string) {
     amountLabel: euro(num(payment.amount)),
     remainder,
     remainderLabel: euro(remainder),
-    config: readPayments(payment.tenant.settings),
+    config: readPayments(payment.tenant.paymentSettings),
     token,
     note: payment.note,
   });

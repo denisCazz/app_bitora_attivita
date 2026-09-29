@@ -2,7 +2,6 @@ import {
   createTenantSchema,
   employeePasswordSchema,
   employeeSchema,
-  INCLUDED_SEATS,
   inviteSchema,
   memberRoleSchema,
   PERMISSIONS,
@@ -16,6 +15,7 @@ import { hashPassword, randomToken, issueSession } from "../lib/auth";
 import { suggestActivity } from "../lib/assistant/setup";
 import { createTenantForUser } from "../lib/bootstrap";
 import { publicCategories, publicPlan } from "../lib/catalog";
+import { platformInt } from "../lib/platform";
 import { prisma } from "../lib/prisma";
 import { loadTeam } from "../lib/seats";
 import { canManagePeople, foundingMembership, isPlatformAdmin } from "../lib/team";
@@ -32,7 +32,8 @@ async function assertSeat(tx: Prisma.TransactionClient, tenantId: string) {
   const tenant = await tx.tenant.findUnique({ where: { id: tenantId } });
   const active = await tx.membership.count({ where: { tenantId, status: "ACTIVE" } });
   const pending = await tx.invite.count({ where: { tenantId, acceptedAt: null, expiresAt: { gt: new Date() } } });
-  if (!tenant || active + pending >= INCLUDED_SEATS + tenant.extraSeats) throw new HttpError(402, seatLimitMessage());
+  const included = await platformInt("included_seats");
+  if (!tenant || active + pending >= included + tenant.extraSeats) throw new HttpError(402, seatLimitMessage());
 }
 
 async function adminRole(tx: Prisma.TransactionClient, tenantId: string) {

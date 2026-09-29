@@ -24,6 +24,13 @@ export const MODULE_KEYS = [
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 
+/** Screens that exist in the app. Any other module key comes from the database. */
+export type NativeModuleKey = ModuleKey;
+
+export function isNativeModuleKey(value: string): value is NativeModuleKey {
+  return (MODULE_KEYS as readonly string[]).includes(value);
+}
+
 export interface ModuleCode {
   route: string;
   permission: Permission;
