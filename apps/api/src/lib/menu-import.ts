@@ -10,18 +10,26 @@ interface Station {
   label: string;
 }
 
+interface Words {
+  menu: string;
+  items: string;
+  /** Items go out as comande to kitchen, bar or counter. */
+  routed: boolean;
+}
+
 export async function previewMenuImport(tenantId: string, url: string) {
   const stations = await stationsOf(tenantId);
+  const words = await wordsOf(tenantId);
   const [page, current] = await Promise.all([readPublicPage(url), loadMenu(tenantId)]);
   let raw: unknown;
   try {
-    raw = await completeJson(prompt(stations, current), page);
+    raw = await completeJson(prompt(stations, current, words), page);
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    throw new HttpError(502, "Non sono riuscito a leggere il menu. Riprova.");
+    throw new HttpError(502, `Non sono riuscito a leggere ${words.menu}. Riprova.`);
   }
   const proposal = readMenuProposal(raw, stations);
-  if (!proposal.items.length) throw new HttpError(422, "Non ho trovato voci di menu su questa pagina");
+  if (!proposal.items.length) throw new HttpError(422, `Non ho trovato ${words.items} con il prezzo su questa pagina`);
   const diff = classifyMenuImport(current, proposal.items, stations);
   return { url, summary: proposal.summary || `Ho trovato ${diff.items.length} voci.`, ...diff };
 }
@@ -94,6 +102,15 @@ export function menuSourceUrl(value: string | null | undefined): string | null {
   return value?.trim() ? value : null;
 }
 
+async function wordsOf(tenantId: string): Promise<Words> {
+  const category = await categoryOfTenant(tenantId);
+  return {
+    menu: `il ${category.terminology.menu.toLowerCase()}`,
+    items: category.terminology.menuItems.toLowerCase(),
+    routed: category.modules.some((module) => module.key === "orders"),
+  };
+}
+
 async function stationsOf(tenantId: string): Promise<Station[]> {
   const stations = (await categoryOfTenant(tenantId)).vocab.stations;
   if (!stations.length) throw new HttpError(400, "Nessun reparto configurato");
@@ -118,26 +135,30 @@ async function loadMenu(tenantId: string): Promise<CurrentMenuItem[]> {
   }));
 }
 
-function prompt(stations: Station[], current: CurrentMenuItem[]): string {
+function prompt(stations: Station[], current: CurrentMenuItem[], words: Words): string {
   const catalog = current
     .slice(0, 120)
     .map((item) => `- ${item.name} | ${item.category} | ${item.price} | ${item.station}`)
     .join("\n");
   return [
-    "Leggi il testo di una pagina di un locale e ricava solo il menu venduto.",
+    `Leggi il testo di una pagina di un'attività e ricava solo ${words.menu}: ${words.items} in vendita, con il prezzo.`,
     "Rispondi solo con un oggetto JSON:",
     '{"summary":"una frase in italiano","items":[{"name":"","category":"","price":0,"station":"KEY","available":true,"modifiers":[{"name":"","priceDelta":0}]}]}',
     "",
     "Reparti, usa la key:",
     ...stations.map((station) => `- ${station.key}: ${station.label}`),
     "",
-    catalog ? `Menu già presente. Se è la stessa voce, riusa esattamente il nome:\n${catalog}` : "Il menu è ancora vuoto.",
+    catalog ? `Voci già presenti. Se è la stessa voce, riusa esattamente il nome:\n${catalog}` : "Non c'è ancora nessuna voce.",
     "",
     "Regole:",
-    "- Solo voci scritte nel testo, con un prezzo in euro. Non inventare piatti, prezzi o categorie.",
+    `- Solo voci scritte nel testo, con un prezzo in euro. Non inventare ${words.items}, prezzi o categorie.`,
     "- price e priceDelta sono numeri, senza simbolo. La virgola è decimale.",
-    "- category è breve e in italiano: Antipasti, Primi, Secondi, Contorni, Pizze, Dolci, Bevande, Vini, Cocktail, Caffè. Raggruppa le voci simili.",
-    "- station è una key dell'elenco. Bevande, vini e caffè vanno al banco se c'è; i piatti in cucina.",
+    words.routed
+      ? "- category è breve e in italiano: Antipasti, Primi, Secondi, Contorni, Pizze, Dolci, Bevande, Vini, Cocktail, Caffè. Raggruppa le voci simili."
+      : "- category è breve e in italiano, con i gruppi che usa la pagina (per esempio Mani, Piedi, Viso, Corpo, Taglio, Colore). Raggruppa le voci simili.",
+    words.routed
+      ? "- station è una key dell'elenco. Bevande, vini e caffè vanno al banco se c'è; i piatti in cucina."
+      : `- station è sempre ${stations[0]!.key}.`,
     "- modifiers solo se il testo indica un'aggiunta o una variante con o senza sovrapprezzo. Se non ci sono, ometti l'array.",
     "- available false solo se il testo dice esaurito o non disponibile.",
     "- summary dice quante voci hai trovato, senza elencarle tutte.",
