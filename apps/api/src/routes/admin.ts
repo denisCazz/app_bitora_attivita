@@ -1,4 +1,4 @@
-import { categoryModuleSchema, categoryRoleSchema, categorySchema, isModuleKey, moduleDefSchema, needSchema, type ResolvedCategory } from "@rapportini/shared";
+import { categoryModuleSchema, categoryRoleSchema, categorySchema, isModuleKey, moduleDefSchema, moduleTermOf, needSchema, type ResolvedCategory } from "@rapportini/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { HttpError, must, parseBody } from "../errors";
@@ -205,18 +205,41 @@ export async function adminRoutes(app: FastifyInstance) {
       sortOrder: body.sortOrder ?? null,
       label: body.label?.trim() ? body.label.trim() : null,
       description: body.description === undefined ? undefined : body.description?.trim() ? body.description.trim() : null,
+      pitch: body.pitch === undefined ? undefined : body.pitch?.trim() ? body.pitch.trim() : null,
+      details: body.details === undefined ? undefined : body.details?.trim() ? body.details.trim() : null,
+      features: body.features,
     };
-    const row = await prisma.categoryModule.upsert({
-      where: { categoryId_moduleKey: { categoryId, moduleKey: body.moduleKey } },
-      create: { categoryId, moduleKey: body.moduleKey, ...data },
-      update: data,
+    const term = moduleTermOf(body.moduleKey);
+    const scopeKey = `category:${categoryId}`;
+    const row = await prisma.$transaction(async (tx) => {
+      const previous = await tx.categoryModule.findUnique({ where: { categoryId_moduleKey: { categoryId, moduleKey: body.moduleKey } } });
+      const saved = await tx.categoryModule.upsert({
+        where: { categoryId_moduleKey: { categoryId, moduleKey: body.moduleKey } },
+        create: { categoryId, moduleKey: body.moduleKey, ...data },
+        update: data,
+      });
+      if (term && data.label) {
+        await tx.termValue.upsert({
+          where: { termKey_scopeKey: { termKey: term, scopeKey } },
+          create: { termKey: term, categoryId, scopeKey, value: data.label },
+          update: { value: data.label },
+        });
+      } else if (term && previous?.label) {
+        await tx.termValue.deleteMany({ where: { termKey: term, scopeKey, value: previous.label } });
+      }
+      return saved;
     });
     invalidateCatalog();
     return row;
   });
 
   app.delete("/admin/categories/:id/modules/:key", { preHandler: admin }, async (request) => {
-    await prisma.categoryModule.deleteMany({ where: { categoryId: param(request, "id"), moduleKey: param(request, "key") } });
+    const categoryId = param(request, "id");
+    const moduleKey = param(request, "key");
+    const term = moduleTermOf(moduleKey);
+    const previous = term ? await prisma.categoryModule.findUnique({ where: { categoryId_moduleKey: { categoryId, moduleKey } } }) : null;
+    if (term && previous?.label) await prisma.termValue.deleteMany({ where: { termKey: term, scopeKey: `category:${categoryId}`, value: previous.label } });
+    await prisma.categoryModule.deleteMany({ where: { categoryId, moduleKey } });
     invalidateCatalog();
     return { ok: true };
   });

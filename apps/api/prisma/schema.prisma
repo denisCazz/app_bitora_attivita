@@ -353,6 +353,9 @@ model CategoryModule {
   sortOrder   Int?
   label       String?
   description String?
+  pitch       String?
+  details     String?
+  features    String[]  @default([])
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 

@@ -5,7 +5,7 @@ import type { ModuleKey } from "./modules";
 import { hasPermission, type Permission } from "./permissions";
 import { EXTRA_SEAT_CENTS, INCLUDED_SEATS, seatMonthlyCents } from "./seats";
 import { storeProductId, type BillingSource } from "./store";
-import { mergeTerminology, type Terminology } from "./verticals";
+import { mergeTerminology, moduleTermOf, type Terminology } from "./verticals";
 
 export interface Branding {
   accent: string;
@@ -169,6 +169,11 @@ export function buildManifest(input: {
   const scoredNeeds = category.key === GENERIC_CATEGORY_KEY ? needsFromModules(needs) : category.needs;
   const scores = scoreModules(category.modules, scoredNeeds, needs);
   const terminology = mergeTerminology(category.terminology, input.tenant.terminology);
+  /** The category already names its modules; a shop that renames the word renames the module too. */
+  const labelOf = (key: string, label: string) => {
+    const term = moduleTermOf(key);
+    return term && terminology[term] !== category.terminology[term] ? terminology[term] : label;
+  };
   const activity = input.tenant.activity?.trim();
   const path = category.path.map((node) => node.label);
   if (activity) path[path.length - 1] = activity;
@@ -192,7 +197,7 @@ export function buildManifest(input: {
       licenseExpiresAt: state?.licensed && state.licenseExpiresAt ? new Date(state.licenseExpiresAt).toISOString() : null,
       renews: renewsBilling(state, input.now),
       storeProductId: storeProductId(definition.key),
-      label: definition.label,
+      label: labelOf(definition.key, definition.label),
       description: definition.description,
       icon: definition.icon,
       route: definition.route,
@@ -208,7 +213,10 @@ export function buildManifest(input: {
   const includedSeats = input.includedSeats ?? INCLUDED_SEATS;
   const extraSeatCents = input.extraSeatCents ?? EXTRA_SEAT_CENTS;
   const generic = category.key === GENERIC_CATEGORY_KEY;
-  const fallbackNav = buildNavigation(usable, input.role.permissions);
+  const fallbackNav = buildNavigation(
+    usable.map((definition) => ({ ...definition, label: labelOf(definition.key, definition.label) })),
+    input.role.permissions,
+  );
   const tabMenu = input.menus?.TAB?.filter((item) => item.key === "more" || item.kind !== "MODULE" || usable.some((module) => module.key === item.moduleKey)) ?? [];
   const moreItem = tabMenu.find((item) => item.key === "more");
   const moduleTabs = tabMenu.filter((item) => item.key !== "more").slice(0, 4);
@@ -232,7 +240,7 @@ export function buildManifest(input: {
     : fallbackNav;
   const navigation = fromMenu.map((item) => ({
     ...item,
-    label: generic ? genericNavLabel(item.key, item.label, terminology) : item.label,
+    label: generic && item.key === "stock" ? terminology.warehouse : generic ? labelOf(item.key, item.label) : item.label,
   }));
   return {
     user: input.user,
@@ -262,15 +270,6 @@ export function buildManifest(input: {
     menus: input.menus ?? { TAB: [], MORE: [], SETTINGS: [], HOME_ACTIONS: [] },
     permissions: input.permissions ?? [],
   };
-}
-
-function genericNavLabel(key: string, label: string, terminology: Terminology): string {
-  if (key === "work_orders") return terminology.workOrders;
-  if (key === "assets") return terminology.assets;
-  if (key === "customers") return terminology.customers;
-  if (key === "spare_parts") return terminology.spareParts;
-  if (key === "stock") return terminology.warehouse;
-  return label;
 }
 
 export function assertPermission(permissions: readonly string[], required: Permission): void {
