@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MODULE_KEYS, STOCK_LOCATION_KINDS } from "./modules";
 import { PERMISSIONS } from "./permissions";
+import { TERMINOLOGY_KEYS } from "./verticals";
 
 export const moduleKeySchema = z.enum(MODULE_KEYS);
 export const permissionSchema = z.enum(PERMISSIONS);
@@ -96,6 +97,9 @@ export const terminologySchema = z.object({
   order: z.string().trim().min(2).max(40).optional(),
   orders: z.string().trim().min(2).max(40).optional(),
 });
+
+/** An empty word drops the shop's own and goes back to the trade's. */
+export const shopTerminologySchema = z.record(z.enum(TERMINOLOGY_KEYS), z.union([z.literal(""), z.string().trim().min(2).max(40)]));
 
 const fieldKeySchema = z.string().trim().regex(/^[a-z][a-z0-9_]{0,39}$/);
 
