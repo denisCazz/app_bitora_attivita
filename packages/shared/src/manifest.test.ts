@@ -152,6 +152,13 @@ describe("resolveCategory", () => {
     expect(mechanic.presets.ledger).toEqual({ income: ["Manodopera"], expense: ["Materiali"] });
   });
 
+  it("names word-bound modules after the trade's word, whatever the module row says", () => {
+    const wellness = node({ id: "w", key: "wellness", terminology: { menu: "Listino", inventory: "Prodotti" }, modules: [row("menu", { label: "Menu" }), row("inventory"), row("shifts", { label: "Turni" })] });
+    const labels = Object.fromEntries(resolveCategory([wellness], defs).modules.map((module) => [module.key, module.label]));
+    expect(labels).toEqual({ menu: "Listino", inventory: "Prodotti", shifts: "Turni" });
+    expect(resolveCategory([hospitality], defs).modules.find((module) => module.key === "menu")?.label).toBe("menu");
+  });
+
   it("drops modules disabled in the global catalog", () => {
     const off = defs.map((def) => (def.key === "spare_parts" ? { ...def, active: false } : def));
     expect(resolveCategory([fieldService], off).modules.some((module) => module.key === "spare_parts")).toBe(false);
@@ -258,6 +265,24 @@ describe("buildManifest", () => {
     expect(manifest.modules.find((module) => module.key === "stock")?.score).toBe(4);
     expect(manifest.tenant.branding.accent).toBe("#E25B2A");
     expect(manifest.tenant.category.path).toEqual(["field_service", "stoves"]);
+  });
+
+  it("renames a module and its tab when the shop changes the word", () => {
+    const input = {
+      user: { id: "u", name: "Marco", email: "m@x.it", platformAdmin: false },
+      category: resolveCategory([fieldService, stoves], defs, needs),
+      memberships: [],
+      role: { id: "r", name: "Titolare", permissions: [...PERMISSIONS] },
+      moduleStates: [{ key: "assets" as const, enabled: true, licensed: true, trialEndsAt: null }],
+      customFields: [],
+      now,
+    };
+    const renamed = buildManifest({ ...input, tenant: { id: "t", name: "Ferri", branding: {}, terminology: { assets: "Caldaie" } } });
+    expect(renamed.modules.find((module) => module.key === "assets")?.label).toBe("Caldaie");
+    expect(renamed.navigation.find((item) => item.key === "assets")?.label).toBe("Caldaie");
+    const same = buildManifest({ ...input, tenant: { id: "t", name: "Ferri", branding: {}, terminology: { assets: "Stufe", workOrders: "Interventi" } } });
+    expect(same.modules.find((module) => module.key === "assets")?.label).toBe("Stufe");
+    expect(same.tenant.terminology.workOrders).toBe("Interventi");
   });
 
   it("hides modules the role cannot read but keeps Altro for profile and team", () => {
