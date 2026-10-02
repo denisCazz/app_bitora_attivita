@@ -1,3 +1,5 @@
+import type { ModuleKey } from "./modules";
+
 export const TERMINOLOGY_KEYS = [
   "workOrder",
   "workOrders",
@@ -9,9 +11,18 @@ export const TERMINOLOGY_KEYS = [
   "spareParts",
   "warehouse",
   "vehicle",
+  "menu",
+  "menuItem",
+  "menuItems",
+  "modifier",
+  "modifiers",
+  "inventory",
+  "order",
+  "orders",
 ] as const;
 
-export type Terminology = Record<(typeof TERMINOLOGY_KEYS)[number], string>;
+export type TermKey = (typeof TERMINOLOGY_KEYS)[number];
+export type Terminology = Record<TermKey, string>;
 
 export const BASE_TERMINOLOGY: Terminology = {
   workOrder: "Intervento",
@@ -24,7 +35,30 @@ export const BASE_TERMINOLOGY: Terminology = {
   spareParts: "Ricambi",
   warehouse: "Magazzino",
   vehicle: "Mezzo",
+  menu: "Menu",
+  menuItem: "Voce",
+  menuItems: "Voci",
+  modifier: "Variante",
+  modifiers: "Varianti",
+  inventory: "Scorte",
+  order: "Comanda",
+  orders: "Comande",
 };
+
+/** Modules named after a word of the trade: the word is the module name everywhere. */
+export const MODULE_TERM: Partial<Record<ModuleKey, TermKey>> = {
+  work_orders: "workOrders",
+  assets: "assets",
+  customers: "customers",
+  spare_parts: "spareParts",
+  menu: "menu",
+  inventory: "inventory",
+  orders: "orders",
+};
+
+export function moduleTermOf(key: string): TermKey | undefined {
+  return MODULE_TERM[key as ModuleKey];
+}
 
 export const DEFAULT_ACCENT = "#2F6FED";
 

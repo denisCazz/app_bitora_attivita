@@ -127,7 +127,7 @@ export const PERMISSION_COPY: Record<Permission, PermissionText> = {
     module: "orders",
     section: "Ordini",
     label: "Prendere e modificare",
-    description: "Aggiunge piatti e aggiorna la comanda",
+    description: "Aggiunge voci e aggiorna la comanda",
   },
   "orders.void": {
     module: "orders",
@@ -139,19 +139,19 @@ export const PERMISSION_COPY: Record<Permission, PermissionText> = {
     module: "menu",
     section: "Menu",
     label: "Solo consultare",
-    description: "Vede piatti, prezzi e cosa è disponibile",
+    description: "Vede le voci, i prezzi e cosa è disponibile",
   },
   "menu.write": {
     module: "menu",
     section: "Menu",
-    label: "Cambiare piatti e prezzi",
+    label: "Cambiare voci e prezzi",
     description: "Aggiunge, nasconde e aggiorna le voci",
   },
   "inventory.read": {
     module: "inventory",
     section: "Scorte",
     label: "Solo consultare",
-    description: "Vede cosa c'è in cucina e al bar",
+    description: "Vede le quantità e cosa sta finendo",
   },
   "inventory.write": {
     module: "inventory",

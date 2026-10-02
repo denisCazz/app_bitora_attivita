@@ -1,4 +1,16 @@
-import { DEFAULT_LEDGER, hasPermission, isModuleKey, isUsable, MODULE_CODE, type Manifest, type ModuleKey, type Vocab, type VocabItem } from "@rapportini/shared";
+import {
+  DEFAULT_LEDGER,
+  hasPermission,
+  isModuleKey,
+  isUsable,
+  mergeTerminology,
+  MODULE_CODE,
+  type Manifest,
+  type ModuleKey,
+  type Terminology,
+  type Vocab,
+  type VocabItem,
+} from "@rapportini/shared";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useSyncExternalStore } from "react";
 import { ApiError, http } from "./api/client";
@@ -142,4 +154,13 @@ export function useMenu(placement: "TAB" | "MORE" | "SETTINGS" | "HOME_ACTIONS")
 export function useTerm(key: string) {
   const terms = useManifest().data?.tenant.terminology as Record<string, string> | undefined;
   return terms?.[key] ?? key;
+}
+
+export function useTerms(): Terminology {
+  return mergeTerminology(useManifest().data?.tenant.terminology);
+}
+
+/** The category sells the module, even if the shop has not unlocked it. */
+export function useSells(key: ModuleKey) {
+  return useManifest().data?.modules.some((module) => module.key === key) ?? false;
 }

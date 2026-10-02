@@ -494,7 +494,7 @@ export default function InventoryScreen() {
     const unitWord = draft.unit.trim() || "unità";
     return (
       <>
-        <Input label={fieldText(ingredientFields, "name", "Nome") ?? "Nome"} value={draft.name} onChangeText={(name) => patchDraft({ name })} placeholder="Es. Farina 00" />
+        <Input label={fieldText(ingredientFields, "name", "Nome") ?? "Nome"} value={draft.name} onChangeText={(name) => patchDraft({ name })} placeholder="Come lo chiami tu" />
         <View style={{ gap: 8 }}>
           <Text variant="label" muted>
             Unità di misura
@@ -522,7 +522,7 @@ export default function InventoryScreen() {
           <Input label={`Giacenza iniziale (${unitWord})`} value={draft.initial} onChangeText={(initial) => patchDraft({ initial })} keyboardType="decimal-pad" placeholder="Quanto ne hai adesso" />
         ) : null}
         <View style={{ gap: 8 }}>
-          <Input label="Categoria" value={draft.category} onChangeText={(value) => patchDraft({ category: value })} placeholder="Es. Latticini, Bevande" />
+          <Input label="Categoria" value={draft.category} onChangeText={(value) => patchDraft({ category: value })} placeholder="Per raggrupparli" />
           {categories.length ? (
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
               {categories.map((name) => (

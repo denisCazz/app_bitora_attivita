@@ -31,7 +31,7 @@ export default function ModulesScreen() {
   return (
     <Screen onBack={() => router.back()} backLabel="Impostazioni">
       <Text variant="display">Moduli</Text>
-      <Text muted>Quello che spegni sparisce dal menu, per tutti. I moduli bloccati si sbloccano dallo Store.</Text>
+      <Text muted>Quello che spegni sparisce dall'app, per tutti. I moduli bloccati si sbloccano dallo Store.</Text>
       {query.data?.map((row) => (
         <Card key={row.moduleKey} style={{ gap: 10, opacity: row.status === "locked" ? 0.85 : 1 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>

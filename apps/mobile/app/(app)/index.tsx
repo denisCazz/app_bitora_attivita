@@ -1,4 +1,4 @@
-import { isUsable, type ManifestModule } from "@rapportini/shared";
+import { isUsable } from "@rapportini/shared";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
@@ -34,7 +34,6 @@ export default function HomeScreen() {
   const theme = useTheme();
   const manifest = useManifest();
   const router = useRouter();
-  const terms = manifest.data?.tenant.terminology;
   const logoUrl = manifest.data?.tenant.branding.logoUrl;
   const moduleOf = (key: string) => manifest.data?.modules.find((module) => module.key === key);
   const usable = (key: string) => {
@@ -54,16 +53,10 @@ export default function HomeScreen() {
   );
   const shown = homeActions.ready ? pickHomeActions(candidates, homeActions.selected) : candidates;
 
-  function moduleTitle(module: ManifestModule) {
-    if (module.key === "work_orders") return terms?.workOrders ?? module.label;
-    if (module.key === "assets") return terms?.assets ?? module.label;
-    return module.label;
-  }
-
   const available: Record<string, { module: string; label: string; value: number; icon: string }> = {
-    openWorkOrders: { module: "work_orders", label: `${terms?.workOrders ?? moduleOf("work_orders")?.label ?? ""} in corso`, value: dashboard.data?.openWorkOrders ?? 0, icon: "construct-outline" },
+    openWorkOrders: { module: "work_orders", label: `${moduleOf("work_orders")?.label ?? ""} in corso`, value: dashboard.data?.openWorkOrders ?? 0, icon: "construct-outline" },
     openOrders: { module: "orders", label: `${moduleOf("orders")?.label ?? ""} in corso`, value: dashboard.data?.openOrders ?? 0, icon: "receipt-outline" },
-    lowStock: { module: "spare_parts", label: `${terms?.spareParts ?? moduleOf("spare_parts")?.label ?? ""} sotto scorta`, value: dashboard.data?.lowStock ?? 0, icon: "cube-outline" },
+    lowStock: { module: "spare_parts", label: `${moduleOf("spare_parts")?.label ?? ""} sotto scorta`, value: dashboard.data?.lowStock ?? 0, icon: "cube-outline" },
     lowInventory: { module: "inventory", label: "Da riordinare", value: dashboard.data?.lowInventory ?? 0, icon: "layers-outline" },
   };
   const configured = useVocab().dashboard ?? [];
@@ -157,7 +150,7 @@ export default function HomeScreen() {
       ) : shown.length ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
           {shown.map((module) => {
-            const title = moduleTitle(module);
+            const title = module.label;
             const locked = module.status === "locked";
             return (
               <Pressy
@@ -192,7 +185,7 @@ export default function HomeScreen() {
         </Card>
       ) : null}
       <Sheet visible={managing} title="Azioni in home" onClose={() => setManaging(false)}>
-        <Text muted>Scegli quali vedere in home. Il menu dell'app non cambia.</Text>
+        <Text muted>Scegli quali vedere in home. La barra in basso non cambia.</Text>
         <Card style={{ paddingVertical: 4 }}>
           {candidates.map((module, index) => {
             const on = homeActions.selected ? homeActions.selected.includes(module.key) : true;
@@ -216,7 +209,7 @@ export default function HomeScreen() {
                   />
                 </View>
                 <View style={{ flex: 1, gap: 2 }}>
-                  <Text variant="heading">{moduleTitle(module)}</Text>
+                  <Text variant="heading">{module.label}</Text>
                   {module.status === "locked" ? (
                     <Text variant="caption" muted>
                       Bloccato
@@ -224,7 +217,7 @@ export default function HomeScreen() {
                   ) : null}
                 </View>
                 <Switch
-                  accessibilityLabel={moduleTitle(module)}
+                  accessibilityLabel={module.label}
                   value={on}
                   disabled={!homeActions.ready}
                   onValueChange={(value) => homeActions.toggle(candidates.map((item) => item.key), module.key, value)}

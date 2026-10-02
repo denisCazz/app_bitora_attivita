@@ -66,7 +66,7 @@ export default function AdminConfigScreen() {
         ))}
       </Card>
       <Card style={{ gap: 8 }}>
-        <Text variant="title">Menu</Text>
+        <Text variant="title">Voci dell'app</Text>
         {(config.data?.nav ?? []).map((item) => (
           <Text key={item.id} variant="caption">{`${item.placement} · ${item.label ?? item.key}`}</Text>
         ))}

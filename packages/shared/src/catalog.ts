@@ -1,7 +1,7 @@
 import { isModuleKey, isNativeModuleKey, MODULE_CODE, type ModuleKey, type StockLocationKind } from "./modules";
 import type { Permission } from "./permissions";
 import { ledgerCategoriesOf, type LedgerCategories } from "./reports";
-import { DEFAULT_ACCENT, mergeTerminology, type Terminology } from "./verticals";
+import { DEFAULT_ACCENT, mergeTerminology, moduleTermOf, type Terminology } from "./verticals";
 
 export interface ModuleDefRow {
   key: string;
@@ -30,6 +30,9 @@ export interface CategoryModuleRow {
   sortOrder: number | null;
   label: string | null;
   description: string | null;
+  pitch?: string | null;
+  details?: string | null;
+  features?: string[];
 }
 
 export interface CategoryRoleRow {
@@ -252,9 +255,15 @@ export function resolveCategory(chain: CategoryNode[], moduleDefs: ModuleDefRow[
         sortOrder: row.sortOrder ?? previous.sortOrder,
         label: row.label ?? previous.label,
         description: row.description ?? previous.description,
+        pitch: row.pitch ?? previous.pitch,
+        details: row.details ?? previous.details,
+        features: row.features?.length ? row.features : previous.features,
       });
     }
   }
+
+  const layers = chain.map((node) => asObject<Terminology>(node.terminology));
+  const terminology = mergeTerminology(...layers);
 
   // A category sells only the modules its branch lists; an unconfigured branch falls back to the whole catalog.
   const configured = [...merged.values()].some((row) => !row.hidden);
@@ -265,13 +274,15 @@ export function resolveCategory(chain: CategoryNode[], moduleDefs: ModuleDefRow[
     const native = isNativeModuleKey(key);
     if (!definition.active || (!native && definition.kind !== "CUSTOM") || row?.hidden || (configured && !row)) continue;
     const code = native ? MODULE_CODE[key] : undefined;
+    const term = moduleTermOf(key);
+    const named = term && layers.some((layer) => typeof layer[term] === "string" && layer[term].trim());
     modules.push({
       key: key as ModuleKey,
-      label: row?.label ?? definition.label,
+      label: named ? terminology[term] : (row?.label ?? definition.label),
       description: row?.description ?? definition.description,
-      pitch: definition.pitch,
-      details: definition.details ?? "",
-      features: definition.features ?? [],
+      pitch: row?.pitch ?? definition.pitch,
+      details: row?.details ?? definition.details ?? "",
+      features: row?.features?.length ? row.features : (definition.features ?? []),
       icon: definition.icon,
       route: definition.route || code?.route || `/x/${key}`,
       permission: definition.readPermission || code?.permission || `${key}.read`,
@@ -307,7 +318,7 @@ export function resolveCategory(chain: CategoryNode[], moduleDefs: ModuleDefRow[
     accent: nearest((node) => node.accent) ?? DEFAULT_ACCENT,
     image: nearest((node) => node.image) ?? null,
     path: chain.map((node) => ({ id: node.id, key: node.key, label: node.label })),
-    terminology: mergeTerminology(...chain.map((node) => asObject<Terminology>(node.terminology))),
+    terminology,
     presets,
     vocab: vocabOf(presets),
     modules,

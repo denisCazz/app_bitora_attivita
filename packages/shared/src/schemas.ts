@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MODULE_KEYS, STOCK_LOCATION_KINDS } from "./modules";
 import { PERMISSIONS } from "./permissions";
+import { TERMINOLOGY_KEYS } from "./verticals";
 
 export const moduleKeySchema = z.enum(MODULE_KEYS);
 export const permissionSchema = z.enum(PERMISSIONS);
@@ -87,7 +88,18 @@ export const terminologySchema = z.object({
   spareParts: z.string().trim().min(2).max(40).optional(),
   warehouse: z.string().trim().min(2).max(40).optional(),
   vehicle: z.string().trim().min(2).max(40).optional(),
+  menu: z.string().trim().min(2).max(40).optional(),
+  menuItem: z.string().trim().min(2).max(40).optional(),
+  menuItems: z.string().trim().min(2).max(40).optional(),
+  modifier: z.string().trim().min(2).max(40).optional(),
+  modifiers: z.string().trim().min(2).max(40).optional(),
+  inventory: z.string().trim().min(2).max(40).optional(),
+  order: z.string().trim().min(2).max(40).optional(),
+  orders: z.string().trim().min(2).max(40).optional(),
 });
+
+/** An empty word drops the shop's own and goes back to the trade's. */
+export const shopTerminologySchema = z.record(z.enum(TERMINOLOGY_KEYS), z.union([z.literal(""), z.string().trim().min(2).max(40)]));
 
 const fieldKeySchema = z.string().trim().regex(/^[a-z][a-z0-9_]{0,39}$/);
 
@@ -576,6 +588,9 @@ export const categoryModuleSchema = z.object({
   sortOrder: z.number().int().min(0).max(999).nullable().optional(),
   label: z.string().trim().max(60).nullable().optional(),
   description: z.string().trim().max(200).nullable().optional(),
+  pitch: z.string().trim().max(200).nullable().optional(),
+  details: z.string().trim().max(2000).nullable().optional(),
+  features: z.array(z.string().trim().min(2).max(120)).max(12).optional(),
 });
 
 export const categoryRoleSchema = z.object({

@@ -220,7 +220,7 @@ export default function ShiftsScreen() {
           }}
           emptyLabel="Nessuno"
         />
-        <Input label="Ruolo" maxLength={40} value={draft?.roleLabel ?? ""} onChangeText={(roleLabel) => setDraft((current) => (current ? { ...current, roleLabel } : current))} placeholder="Sala, cucina…" />
+        <Input label="Ruolo" maxLength={40} value={draft?.roleLabel ?? ""} onChangeText={(roleLabel) => setDraft((current) => (current ? { ...current, roleLabel } : current))} placeholder="Es. Apertura, Banco" />
         <DateField
           label="Giorno"
           clearable={false}

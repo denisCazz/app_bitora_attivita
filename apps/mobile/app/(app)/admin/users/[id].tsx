@@ -16,6 +16,14 @@ const TERM_LABEL: Record<keyof Terminology, string> = {
   spareParts: "Ricambi",
   warehouse: "Magazzino",
   vehicle: "Mezzo",
+  menu: "Menu",
+  menuItem: "Voce",
+  menuItems: "Voci",
+  modifier: "Variante",
+  modifiers: "Varianti",
+  inventory: "Scorte",
+  order: "Comanda",
+  orders: "Comande",
 };
 
 const ENTITY_LABEL: Record<string, string> = {

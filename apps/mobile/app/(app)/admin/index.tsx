@@ -93,7 +93,7 @@ export default function ConsoleScreen() {
       <Card style={{ paddingVertical: 4 }}>
         <ListItem
           title="Configurazione"
-          subtitle="Moduli custom, campi, vocabolari, menu, parole e piattaforma"
+          subtitle="Moduli custom, campi, vocabolari, voci dell'app, parole e piattaforma"
           leading={<Ionicons name="options-outline" size={20} color={theme.colors.accent} />}
           onPress={() => router.push("/(app)/admin/config")}
         />

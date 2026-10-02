@@ -1,4 +1,4 @@
-import { brandingSchema, customFieldDefSchema, moduleStatus, moduleToggleSchema, needsSchema, roleSchema, terminologySchema } from "@rapportini/shared";
+import { brandingSchema, customFieldDefSchema, moduleStatus, moduleToggleSchema, needsSchema, roleSchema, shopTerminologySchema } from "@rapportini/shared";
 import { categoryOfTenant, invalidateCatalog } from "../lib/catalog";
 import { ENTITY_KEY } from "../lib/values";
 import type { FastifyInstance } from "fastify";
@@ -167,12 +167,12 @@ export async function settingsRoutes(app: FastifyInstance) {
   });
 
   app.patch("/settings/terminology", { preHandler: manage }, async (request) => {
-    const body = parseBody(terminologySchema, request.body);
+    const body = parseBody(shopTerminologySchema, request.body);
     const id = tenantId(request);
     const scopeKey = `tenant:${id}`;
     for (const [termKey, value] of Object.entries(body)) {
       if (!value?.trim()) {
-        await prisma.termValue.deleteMany({ where: { tenantId: id, termKey } });
+        await prisma.termValue.deleteMany({ where: { termKey, scopeKey } });
         continue;
       }
       await prisma.termValue.upsert({
