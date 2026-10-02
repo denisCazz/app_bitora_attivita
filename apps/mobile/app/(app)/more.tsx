@@ -27,7 +27,6 @@ export default function MoreScreen() {
   const theme = useTheme();
   const router = useRouter();
   const setSession = useAuth((state) => state.setSession);
-  const terms = manifest.data?.tenant.terminology;
   const tabs = new Set((manifest.data?.navigation ?? []).map((item) => item.key));
   const modules = (manifest.data?.modules ?? []).filter(
     (module) => module.key !== "dashboard" && module.status !== "off" && modulePermitted(manifest.data, module.key),
@@ -40,12 +39,6 @@ export default function MoreScreen() {
   const showTeam = Boolean(manifest.data?.managesPeople) || can(manifest.data, "team.manage");
   const showSettings = can(manifest.data, "settings.manage");
   const extra = useMenu("MORE").filter((item) => item.route && item.kind !== "MODULE" && (!item.permission || can(manifest.data, item.permission)));
-
-  function titleOf(key: string, label: string) {
-    if (key === "work_orders") return terms?.workOrders ?? label;
-    if (key === "assets") return terms?.assets ?? label;
-    return label;
-  }
 
   async function logout() {
     if (!(await confirmSignOut())) return;
@@ -156,7 +149,7 @@ export default function MoreScreen() {
             <MenuRow
               key={module.key}
               icon={glyph(module.icon)}
-              title={titleOf(module.key, module.label)}
+              title={module.label}
               subtitle={module.status === "trial" ? `In prova · ${daysLeft(module.trialEndsAt)} giorni` : module.description}
               onPress={() => router.push(`/(app)${module.route}` as never)}
             />
@@ -181,7 +174,7 @@ export default function MoreScreen() {
                 key={module.key}
                 icon={glyph(module.icon)}
                 tone="muted"
-                title={titleOf(module.key, module.label)}
+                title={module.label}
                 subtitle={module.pitch}
                 trailing={<Badge label={monthly(module.priceCents)} />}
                 onPress={() => router.push({ pathname: "/(app)/store", params: { module: module.key } })}

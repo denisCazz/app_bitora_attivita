@@ -1,4 +1,4 @@
-import { groupMenu, menuItemSchema, menuKey, modifierSchema } from "@rapportini/shared";
+import { groupMenu, menuItemSchema, menuKey, modifierSchema, type Terminology } from "@rapportini/shared";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -11,7 +11,7 @@ import { queryClient } from "../../src/api/query";
 import { Chip } from "../../src/components/Chip";
 import { QueryState } from "../../src/components/States";
 import { euro, stationPhrase, towardStation } from "../../src/format";
-import { can, fieldText, useFields, useManifest, useVocab, vocabLabel } from "../../src/session";
+import { can, fieldText, useFields, useManifest, useSells, useTerms, useVocab, vocabLabel } from "../../src/session";
 
 interface Modifier {
   id: string;
@@ -71,9 +71,13 @@ function hostLabel(value: string) {
   }
 }
 
-function itemMeta(item: Item, stations: Array<{ key: string; label: string }>) {
-  const where = stations.length > 1 ? towardStation(vocabLabel(stations, item.station)) : "";
-  const variants = item.modifiers.length === 1 ? "1 variante" : item.modifiers.length > 1 ? `${item.modifiers.length} varianti` : "";
+function counted(count: number, one: string, many: string) {
+  return `${count} ${(count === 1 ? one : many).toLowerCase()}`;
+}
+
+function itemMeta(item: Item, stations: Array<{ key: string; label: string }>, routed: boolean, terms: Terminology) {
+  const where = routed ? towardStation(vocabLabel(stations, item.station)) : "";
+  const variants = item.modifiers.length ? counted(item.modifiers.length, terms.modifier, terms.modifiers) : "";
   return [where ? `Va ${where}` : "", variants, item.available ? "" : "Non disponibile"].filter(Boolean).join(" · ");
 }
 
@@ -84,6 +88,10 @@ export default function MenuScreen() {
   const writable = can(manifest.data, "menu.write");
   const readable = can(manifest.data, "menu.read");
   const { stations } = useVocab();
+  const terms = useTerms();
+  const routed = useSells("orders") && stations.length > 1;
+  const item = terms.menuItem.toLowerCase();
+  const items = terms.menuItems.toLowerCase();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [variantsOpen, setVariantsOpen] = useState(false);
   const [site, setSite] = useState({ open: false, auto: false });
@@ -178,31 +186,31 @@ export default function MenuScreen() {
     remove.reset();
   }
 
-  const where = stationPhrase(stations.map((station) => station.label));
+  const where = routed ? stationPhrase(stations.map((station) => station.label)) : "";
   const total = query.data?.length ?? 0;
   const categoryCount = new Set((query.data ?? []).map((item) => menuKey(item.category || "Altro"))).size;
 
   if (manifest.data && !readable) {
     return (
       <Screen>
-        <Text variant="display">Menu</Text>
-        <EmptyState title="Non è il tuo menu" message="Piatti e prezzi li gestisce chi ha il permesso. Tu qui non li vedi." />
+        <Text variant="display">{terms.menu}</Text>
+        <EmptyState title="Non hai accesso" message={`${terms.menuItems} e prezzi li gestisce chi ha il permesso. Tu qui non li vedi.`} />
       </Screen>
     );
   }
 
   return (
     <Screen onRefresh={() => Promise.all([query.refetch(), writable ? source.refetch() : Promise.resolve()])}>
-      <Text variant="display">Menu</Text>
+      <Text variant="display">{terms.menu}</Text>
       <Text muted>
         {total
-          ? `${total} ${total === 1 ? "voce" : "voci"} in ${categoryCount} ${categoryCount === 1 ? "categoria" : "categorie"}.`
-          : "Piatti e bevande, divisi per categoria."}{" "}
-        {where ? `Quando invii la comanda, ogni voce parte ${where}.` : "Sono le voci che si scelgono in comanda."}
+          ? `${counted(total, terms.menuItem, terms.menuItems)} in ${counted(categoryCount, "categoria", "categorie")}.`
+          : `${terms.menuItems} e prezzi, divisi per categoria.`}
+        {where ? ` All’invio, ogni ${item} parte ${where}.` : ""}
       </Text>
       {writable ? (
         <View style={{ flexDirection: "row", gap: 10 }}>
-          <Button label="Varianti" tone="secondary" style={{ flex: 1 }} onPress={() => setVariantsOpen(true)} />
+          <Button label={terms.modifiers} tone="secondary" style={{ flex: 1 }} onPress={() => setVariantsOpen(true)} />
           <Button
             label={source.data?.url ? "Aggiorna" : "Dal sito"}
             tone="secondary"
@@ -240,7 +248,7 @@ export default function MenuScreen() {
                   </View>
                   <Card style={{ paddingVertical: 4 }}>
                     {group.items.map((item, index) => {
-                      const meta = itemMeta(item, stations);
+                      const meta = itemMeta(item, stations, routed, terms);
                       return (
                         <Pressy
                           key={item.id}
@@ -275,18 +283,18 @@ export default function MenuScreen() {
                 </View>
               ))
             ) : (
-              <Text muted>Nessuna voce con questo nome.</Text>
+              <Text muted>Niente con questo nome.</Text>
             )}
           </>
         ) : (
           <EmptyState
-            title="Menu vuoto"
-            message={writable ? "Aggiungi una voce con +, oppure leggila dal sito del locale." : "Non c'è ancora nessuna voce."}
+            title={`${terms.menu}: ancora vuoto`}
+            message={writable ? "Tocca + per aggiungerne, oppure importa dal tuo sito." : `Non ci sono ancora ${items}.`}
           />
         )}
       </QueryState>
       {writable ? <Fab onPress={openCreate} /> : null}
-      <Sheet visible={Boolean(draft)} title={draft?.id ? "Modifica voce" : "Nuova voce"} onClose={closeSheet}>
+      <Sheet visible={Boolean(draft)} title={draft?.id ? `Modifica ${item}` : `Aggiungi ${item}`} onClose={closeSheet}>
         <Input label={fieldText(menuFields, "name", "Nome") ?? "Nome"} value={draft?.name ?? ""} onChangeText={(name) => setDraft((current) => (current ? { ...current, name } : current))} />
         <Input label={fieldText(menuFields, "category", "Categoria") ?? "Categoria"} value={draft?.category ?? ""} onChangeText={(category) => setDraft((current) => (current ? { ...current, category } : current))} />
         <Input
@@ -295,10 +303,10 @@ export default function MenuScreen() {
           value={draft?.price ?? ""}
           onChangeText={(price) => setDraft((current) => (current ? { ...current, price } : current))}
         />
-        {stations.length > 1 ? (
+        {routed ? (
           <View style={{ gap: 8 }}>
-            <Text variant="label">Dove la mandi</Text>
-            <Text muted>Quando invii la comanda, questa voce arriva qui.</Text>
+            <Text variant="label">Dove arriva</Text>
+            <Text muted>All’invio arriva qui.</Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
               {stations.map(({ key, label }) => (
                 <Chip key={key} label={label} active={draft?.station === key} onPress={() => setDraft((current) => (current ? { ...current, station: key } : current))} />
@@ -312,7 +320,7 @@ export default function MenuScreen() {
         </View>
         {modifiers.data?.length ? (
           <View style={{ gap: 8 }}>
-            <Text variant="label">Varianti</Text>
+            <Text variant="label">{terms.modifiers}</Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
               {modifiers.data.map((modifier) => (
                 <Chip
@@ -341,8 +349,12 @@ export default function MenuScreen() {
         <Button label="Salva" loading={save.isPending} onPress={() => save.mutate()} />
         {draft?.id ? <Button label="Elimina" tone="danger" loading={remove.isPending} onPress={() => remove.mutate(draft.id!)} /> : null}
       </Sheet>
-      <Sheet visible={variantsOpen} title="Varianti" onClose={() => setVariantsOpen(false)}>
-        <Text muted>Aggiunte che si scelgono in comanda, per esempio «senza ghiaccio». Il prezzo è un sovrapprezzo e vale per tutte le voci a cui la colleghi.</Text>
+      <Sheet visible={variantsOpen} title={terms.modifiers} onClose={() => setVariantsOpen(false)}>
+        <Text muted>
+          {routed
+            ? `Aggiunte che si scelgono in ${terms.order.toLowerCase()}. Il sovrapprezzo si somma al prezzo.`
+            : "Aggiunte che il cliente può scegliere. Il sovrapprezzo si somma al prezzo."}
+        </Text>
         {modifiers.data?.length ? (
           <Card style={{ paddingVertical: 4 }}>
             {modifiers.data.map((modifier, index) => (
@@ -371,7 +383,7 @@ export default function MenuScreen() {
             ))}
           </Card>
         ) : (
-          <Text muted>Nessuna variante ancora.</Text>
+          <Text muted>Non ce ne sono ancora.</Text>
         )}
         {removeModifier.error ? <Text style={{ color: theme.colors.danger }}>{removeModifier.error.message}</Text> : null}
         <Controller control={modifierForm.control} name="name" render={({ field }) => <Input label="Nome" value={field.value} onChangeText={field.onChange} />} />
@@ -380,7 +392,7 @@ export default function MenuScreen() {
           name="priceDelta"
           render={({ field }) => (
             <Input
-              label="Variazione prezzo"
+              label="Sovrapprezzo"
               keyboardType="decimal-pad"
               value={field.value ? String(field.value) : ""}
               onChangeText={(text) => field.onChange(Number(text.replace(",", ".")) || 0)}
@@ -388,13 +400,15 @@ export default function MenuScreen() {
           )}
         />
         {addModifier.error ? <Text style={{ color: theme.colors.danger }}>{addModifier.error.message}</Text> : null}
-        <Button label="Aggiungi variante" tone="secondary" loading={addModifier.isPending} onPress={modifierForm.handleSubmit((values) => addModifier.mutate(values))} />
+        <Button label={`Aggiungi ${terms.modifier.toLowerCase()}`} tone="secondary" loading={addModifier.isPending} onPress={modifierForm.handleSubmit((values) => addModifier.mutate(values))} />
       </Sheet>
       <SiteSheet
         visible={site.open}
         auto={site.auto}
         initialUrl={source.data?.url ?? ""}
         stations={stations}
+        routed={routed}
+        terms={terms}
         onClose={() => setSite({ open: false, auto: false })}
         onApplied={async () => {
           setSite({ open: false, auto: false });
@@ -414,6 +428,8 @@ function SiteSheet({
   auto,
   initialUrl,
   stations,
+  routed,
+  terms,
   onClose,
   onApplied,
 }: {
@@ -421,11 +437,14 @@ function SiteSheet({
   auto: boolean;
   initialUrl: string;
   stations: Array<{ key: string; label: string }>;
+  routed: boolean;
+  terms: Terminology;
   onClose: () => void;
   onApplied: () => Promise<void>;
 }) {
   const theme = useTheme();
   const consent = useAiConsent();
+  const menu = `il ${terms.menu.toLowerCase()}`;
   const [url, setUrl] = useState(initialUrl);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [hideMissing, setHideMissing] = useState(false);
@@ -492,12 +511,12 @@ function SiteSheet({
   }
 
   return (
-    <Sheet visible={visible} title="Menu dal sito" onClose={onClose}>
-      <Text muted>Metti l’indirizzo della pagina. L’assistente la legge e ti propone categorie, prezzi e varianti. Niente viene salvato finché non confermi.</Text>
+    <Sheet visible={visible} title={`${terms.menu} dal sito`} onClose={onClose}>
+      <Text muted>{`Metti l’indirizzo della pagina. L’assistente la legge e ti propone categorie, prezzi e ${terms.modifiers.toLowerCase()}. Niente viene salvato finché non confermi.`}</Text>
       {needsConsent ? (
         <Card style={{ gap: 8 }}>
           <Text variant="heading">Serve il consenso all’assistente</Text>
-          <Text muted>Il testo della pagina viene inviato a OpenAI per ricavare il menu. Puoi revocarlo da Profilo.</Text>
+          <Text muted>{`Il testo della pagina viene inviato a OpenAI per ricavare ${menu}. Puoi revocarlo da Profilo.`}</Text>
           <Button label="Accetto e continuo" loading={accepting || consent.loading} onPress={() => void accept()} />
         </Card>
       ) : (
@@ -542,10 +561,10 @@ function SiteSheet({
                       <Text variant="heading" numberOfLines={1} style={{ flex: 1 }}>
                         {item.name}
                       </Text>
-                      <Badge tone={item.change === "new" ? "accent" : "warning"} label={item.change === "new" ? "Nuova" : "Aggiornata"} />
+                      <Badge tone={item.change === "new" ? "accent" : "warning"} label={item.change === "new" ? "Da aggiungere" : "Da aggiornare"} />
                     </View>
                     <Text variant="caption" muted>
-                      {[euro(item.price), stations.length > 1 ? vocabLabel(stations, item.station) : "", item.modifiers.length ? item.modifiers.map((modifier) => modifier.name).join(", ") : ""]
+                      {[euro(item.price), routed ? vocabLabel(stations, item.station) : "", item.modifiers.length ? item.modifiers.map((modifier) => modifier.name).join(", ") : ""]
                         .filter(Boolean)
                         .join(" · ")}
                     </Text>
@@ -554,18 +573,18 @@ function SiteSheet({
               </Card>
             </View>
           ))}
-          {same ? <Text muted>{same === 1 ? "1 voce è già uguale e resta com’è." : `${same} voci sono già uguali e restano com’erano.`}</Text> : null}
+          {same ? <Text muted>{`Già uguali al sito: ${same}. Restano come sono.`}</Text> : null}
           {preview.missing.length ? (
             <Card style={{ gap: 10 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
                 <View style={{ flex: 1, gap: 2 }}>
-                  <Text variant="heading">Voci che sul sito non ci sono</Text>
+                  <Text variant="heading">{`${terms.menuItems} che sul sito non ci sono`}</Text>
                   <Text variant="caption" muted>
                     {preview.missing.map((item) => item.name).join(", ")}
                   </Text>
                 </View>
                 <Switch
-                  accessibilityLabel="Segna non disponibili le voci assenti dal sito"
+                  accessibilityLabel="Rendi non disponibile ciò che manca sul sito"
                   value={hideMissing}
                   onValueChange={setHideMissing}
                   trackColor={{ true: theme.colors.accent, false: theme.colors.line }}
@@ -573,13 +592,13 @@ function SiteSheet({
                 />
               </View>
               <Text variant="caption" muted>
-                Acceso: le segni non disponibili. Spento: restano nel menu.
+                Acceso: diventano non disponibili. Spento: restano come sono.
               </Text>
             </Card>
           ) : null}
-          {!changed.length && !preview.missing.length ? <Text muted>Il menu è già allineato al sito.</Text> : null}
+          {!changed.length && !preview.missing.length ? <Text muted>{`${terms.menu}: già allineato al sito.`}</Text> : null}
           {apply.error ? <Text style={{ color: theme.colors.danger }}>{apply.error.message}</Text> : null}
-          {canApply ? <Button label="Imposta il menu" loading={apply.isPending} onPress={() => apply.mutate({ current: preview, hideMissing })} /> : null}
+          {canApply ? <Button label="Conferma" loading={apply.isPending} onPress={() => apply.mutate({ current: preview, hideMissing })} /> : null}
         </>
       ) : null}
     </Sheet>

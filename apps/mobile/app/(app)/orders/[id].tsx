@@ -9,7 +9,7 @@ import { QueryState } from "../../../src/components/States";
 import { STATUS_LABEL, euro, lineStatusLabel, stationPhrase, towardStation } from "../../../src/format";
 import { Chip } from "../../../src/components/Chip";
 import { useOrderDraft, type DraftLine } from "../../../src/orderDraft";
-import { can, useManifest, useVocab, vocabLabel } from "../../../src/session";
+import { can, useManifest, useTerms, useVocab, vocabLabel } from "../../../src/session";
 
 interface ModifierRow {
   modifier: { id: string; name: string; priceDelta: string | number };
@@ -51,6 +51,8 @@ export default function OrderScreen() {
   const theme = useTheme();
   const manifest = useManifest();
   const { stations } = useVocab();
+  const terms = useTerms();
+  const menuWord = terms.menu.toLowerCase();
   const draft = useOrderDraft((state) => state.drafts[id] ?? EMPTY);
   const addDraft = useOrderDraft((state) => state.add);
   const changeDraft = useOrderDraft((state) => state.change);
@@ -246,7 +248,7 @@ export default function OrderScreen() {
             ) : null}
 
             {editable ? (
-              <Button label={draft.length ? "Aggiungi dal menu" : "Prendi l'ordine"} tone={draft.length ? "secondary" : "primary"} onPress={openMenu} />
+              <Button label={draft.length ? `Aggiungi dal ${menuWord}` : "Prendi l'ordine"} tone={draft.length ? "secondary" : "primary"} onPress={openMenu} />
             ) : null}
             {editable && !draft.length && waiting.length ? (
               <Button label="Invia le voci in attesa" tone="secondary" loading={send.isPending} onPress={() => send.mutate([])} />
@@ -352,7 +354,7 @@ export default function OrderScreen() {
                       ))}
                     </View>
                   ) : null}
-                  {menu.isLoading ? <Text muted>Carico il menu…</Text> : null}
+                  {menu.isLoading ? <Text muted>{`Carico il ${menuWord}…`}</Text> : null}
                   {menu.error ? <Text style={{ color: theme.colors.danger }}>{menu.error.message}</Text> : null}
                   {sections.map((section) => (
                     <View key={section.category}>
@@ -363,10 +365,10 @@ export default function OrderScreen() {
                     </View>
                   ))}
                   {!menu.isLoading && !menu.error && dishes.length === 0 ? (
-                    <Text muted>{search.trim() || category ? "Nessun risultato." : "Nessuna voce nel menu."}</Text>
+                    <Text muted>{search.trim() || category ? "Nessun risultato." : `Il ${menuWord} è vuoto.`}</Text>
                   ) : null}
                   <Button
-                    label={manual ? "Nascondi voce scritta" : "Non è nel menu"}
+                    label={manual ? "Nascondi voce scritta" : `Non è nel ${menuWord}`}
                     tone="ghost"
                     onPress={() =>
                       setManual((value) => {

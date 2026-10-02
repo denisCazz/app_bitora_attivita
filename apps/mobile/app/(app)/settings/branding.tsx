@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { brandingSchema, terminologySchema } from "@rapportini/shared";
+import { brandingSchema, shopTerminologySchema, type ModuleKey, type TermKey } from "@rapportini/shared";
 import { useMutation } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
@@ -10,29 +10,53 @@ import { Button, Card, Input, Screen, Text, useTheme } from "@rapportini/ui";
 import { http, mediaUrl, upload } from "../../../src/api/client";
 import { queryClient } from "../../../src/api/query";
 import { ColorPicker } from "../../../src/components/ColorPicker";
-import { useManifest } from "../../../src/session";
+import { useManifest, useTerms } from "../../../src/session";
 
 const DEFAULT_ACCENT = "#E25B2A";
 const LOGO_MAX_BYTES = 6 * 1024 * 1024;
 const EXTENSION: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
 
+const WORDS: Array<{ module: ModuleKey; words: Array<{ key: TermKey; label: string }> }> = [
+  { module: "work_orders", words: [{ key: "workOrder", label: "Uno" }, { key: "workOrders", label: "Tanti" }] },
+  { module: "assets", words: [{ key: "asset", label: "Uno" }, { key: "assets", label: "Tanti" }] },
+  { module: "customers", words: [{ key: "customer", label: "Uno" }, { key: "customers", label: "Tanti" }] },
+  { module: "spare_parts", words: [{ key: "sparePart", label: "Uno" }, { key: "spareParts", label: "Tanti" }] },
+  {
+    module: "menu",
+    words: [
+      { key: "menu", label: "Nome dell'elenco" },
+      { key: "menuItem", label: "Una voce" },
+      { key: "menuItems", label: "Tante voci" },
+      { key: "modifier", label: "Un'aggiunta" },
+      { key: "modifiers", label: "Tante aggiunte" },
+    ],
+  },
+  { module: "inventory", words: [{ key: "inventory", label: "Nome della sezione" }] },
+  { module: "orders", words: [{ key: "order", label: "Una" }, { key: "orders", label: "Tante" }] },
+];
+
 export default function BrandingScreen() {
   const router = useRouter();
   const manifest = useManifest();
   const theme = useTheme();
-  const terms = manifest.data?.tenant.terminology;
+  const terms = useTerms();
   const logoUrl = manifest.data?.tenant.branding.logoUrl ?? null;
   const [accent, setAccent] = useState(manifest.data?.tenant.branding.accent ?? DEFAULT_ACCENT);
-  const [workOrder, setWorkOrder] = useState(terms?.workOrder ?? "");
-  const [workOrders, setWorkOrders] = useState(terms?.workOrders ?? "");
-  const [asset, setAsset] = useState(terms?.asset ?? "");
-  const [assets, setAssets] = useState(terms?.assets ?? "");
+  const [words, setWords] = useState<Partial<Record<TermKey, string>>>({});
+  const groups = WORDS.flatMap((group) => {
+    const module = manifest.data?.modules.find((row) => row.key === group.module && row.status !== "off");
+    return module ? [{ ...group, title: module.label }] : [];
+  });
   const save = useMutation({
     mutationFn: async () => {
       await http.patch("/settings/branding", brandingSchema.parse({ accent }));
-      await http.patch("/settings/terminology", terminologySchema.parse({ workOrder, workOrders, asset, assets }));
+      const changed = Object.fromEntries(Object.entries(words).filter(([key, value]) => value.trim() !== terms[key as TermKey]));
+      if (Object.keys(changed).length) await http.patch("/settings/terminology", shopTerminologySchema.parse(changed));
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["manifest"] }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["manifest"] });
+      setWords({});
+    },
   });
   const uploadLogo = useMutation({
     mutationFn: async () => {
@@ -100,11 +124,28 @@ export default function BrandingScreen() {
         </Text>
         <ColorPicker value={accent} onChange={setAccent} />
       </Card>
-      <Input label="Singolare intervento" value={workOrder} onChangeText={setWorkOrder} />
-      <Input label="Plurale interventi" value={workOrders} onChangeText={setWorkOrders} />
-      <Input label="Singolare impianto" value={asset} onChangeText={setAsset} />
-      <Input label="Plurale impianti" value={assets} onChangeText={setAssets} />
-      {save.isSuccess ? <Text>Salvato. Riapri la home per vedere il menu aggiornato.</Text> : null}
+      {groups.length ? (
+        <Card style={{ gap: 12 }}>
+          <Text variant="heading">Le tue parole</Text>
+          <Text variant="caption" muted>
+            Cambiale se nel tuo negozio dite in un altro modo. Il nome nella barra e in Altro segue. Lascia vuoto per tornare a quella del mestiere.
+          </Text>
+          {groups.map((group) => (
+            <View key={group.module} style={{ gap: 8 }}>
+              <Text variant="label">{group.title}</Text>
+              {group.words.map(({ key, label }) => (
+                <Input
+                  key={key}
+                  label={label}
+                  value={words[key] ?? terms[key]}
+                  onChangeText={(text) => setWords((current) => ({ ...current, [key]: text }))}
+                />
+              ))}
+            </View>
+          ))}
+        </Card>
+      ) : null}
+      {save.isSuccess ? <Text>Salvato.</Text> : null}
       {save.error ? <Text>{save.error.message}</Text> : null}
       <Button label="Salva" loading={save.isPending} onPress={() => save.mutate()} />
     </Screen>

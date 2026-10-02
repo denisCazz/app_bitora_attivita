@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { BASE_TERMINOLOGY, customFieldDefSchema, isUsable, type ModuleKey, type Terminology } from "@rapportini/shared";
+import { customFieldDefSchema, isUsable, type ModuleKey, type Terminology } from "@rapportini/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { View } from "react-native";
@@ -8,7 +8,7 @@ import { http } from "../../../src/api/client";
 import { queryClient } from "../../../src/api/query";
 import { Chip } from "../../../src/components/Chip";
 import { QueryState } from "../../../src/components/States";
-import { useManifest } from "../../../src/session";
+import { useManifest, useTerms } from "../../../src/session";
 
 const ENTITIES = ["CUSTOMER", "ASSET", "WORK_ORDER", "PRODUCT"] as const;
 const TYPES = ["TEXT", "NUMBER", "DATE", "SELECT", "PHOTO"] as const;
@@ -44,7 +44,7 @@ function place(entity: Entity, terms: Terminology) {
   if (entity === "CUSTOMER") return `Scheda ${terms.customer.toLowerCase()}`;
   if (entity === "ASSET") return `Scheda ${terms.asset.toLowerCase()}`;
   if (entity === "WORK_ORDER") return terms.workOrder;
-  return "Voce del menu";
+  return `Scheda ${terms.menuItem.toLowerCase()}`;
 }
 
 function optionLabels(value: unknown) {
@@ -77,7 +77,7 @@ function uniqueKey(label: string, taken: string[]) {
 export default function FieldsScreen() {
   const router = useRouter();
   const manifest = useManifest();
-  const terms = manifest.data?.tenant.terminology ?? BASE_TERMINOLOGY;
+  const terms = useTerms();
   const places = ENTITIES.filter((item) => {
     const modules = manifest.data?.modules;
     if (!modules) return true;
@@ -124,7 +124,7 @@ export default function FieldsScreen() {
         {choices.includes("ASSET")
           ? `Sono domande in più sulle schede. Per esempio «Codice fiscale» nella scheda ${terms.customer.toLowerCase()}, o «Potenza» nella scheda ${terms.asset.toLowerCase()}. Le vedi solo nel punto che scegli qui.`
           : choices.includes("PRODUCT")
-            ? "Sono domande in più sulle schede. Per esempio «Codice fiscale» sul cliente, o «Allergeni» su una voce del menu. Le vedi solo nel punto che scegli qui."
+            ? `Sono domande in più sulle schede. Per esempio «Codice fiscale» nella scheda ${terms.customer.toLowerCase()}, o «Durata» nella scheda ${terms.menuItem.toLowerCase()}. Le vedi solo nel punto che scegli qui.`
             : "Sono domande in più sulle schede. Dai un nome, scegli dove compaiono e che risposta ti aspetti. Le vedi solo lì."}
       </Text>
       <QueryState isLoading={fields.isLoading} error={fields.error} refetch={() => fields.refetch()}>

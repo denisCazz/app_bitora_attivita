@@ -20,6 +20,14 @@ const TERM_LABEL: Record<keyof Terminology, string> = {
   spareParts: "Ricambi (plurale)",
   warehouse: "Magazzino",
   vehicle: "Mezzo (furgone, auto…)",
+  menu: "Menu o listino",
+  menuItem: "Voce del menu (singolare)",
+  menuItems: "Voci del menu (plurale)",
+  modifier: "Variante (singolare)",
+  modifiers: "Varianti (plurale)",
+  inventory: "Scorte",
+  order: "Comanda (singolare)",
+  orders: "Comande (plurale)",
 };
 
 const SWATCHES = ["#2F6FED", "#E25B2A", "#D9480F", "#0EA5E9", "#1C6B56", "#B4431E", "#7C3AED", "#DB2777", "#0F766E", "#CA8A04"];
@@ -186,7 +194,7 @@ function ModuleRow({
           <>
             <Chip label="Consigliato" active={effective.recommended} onPress={() => void run(() => upsert.mutateAsync({ ...base, included: true, recommended: !effective.recommended }))} />
             <Chip label="Gratis" tone={theme.colors.success} active={effective.free} onPress={() => void run(() => upsert.mutateAsync({ ...base, included: true, free: !effective.free }))} />
-            <Chip label="Nel menu" active={effective.tab} onPress={() => void run(() => upsert.mutateAsync({ ...base, included: true, tab: !effective.tab }))} />
+            <Chip label="Nella barra" active={effective.tab} onPress={() => void run(() => upsert.mutateAsync({ ...base, included: true, tab: !effective.tab }))} />
           </>
         ) : null}
         {own && parentId ? <Chip label="↺ Eredita" active={false} onPress={() => void run(() => reset.mutateAsync(definition.key))} /> : null}
@@ -210,7 +218,7 @@ function ModulesSection({ category, preview }: { category: AdminCategory; previe
   return (
     <Section
       title="Moduli"
-      hint="La categoria vende solo i moduli elencati qui o nella categoria padre: gli altri restano nascosti. Qui decidi cosa è gratis, cosa proponiamo per primo (consigliato), cosa sta nel menu e cosa nascondere. Nome e testo vuoti usano il modello del catalogo."
+      hint="La categoria vende solo i moduli elencati qui o nella categoria padre: gli altri restano nascosti. Qui decidi cosa è gratis, cosa proponiamo per primo (consigliato), cosa sta nella barra in basso e cosa nascondere. Nome e testo vuoti usano il modello del catalogo."
     >
       {catalog.data?.modules.map((definition) => {
         const own = category.modules.find((row) => row.moduleKey === definition.key);

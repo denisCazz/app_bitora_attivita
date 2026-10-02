@@ -17,7 +17,7 @@ const FALLBACK = [
     { key: "branding", label: "Aspetto e parole", subtitle: "Logo, colore e terminologia", icon: "color-palette-outline", route: "/settings/branding" },
     { key: "modules", label: "Moduli", subtitle: "Accendi o spegni le sezioni", icon: "apps-outline", route: "/settings/modules" },
     { key: "store", label: "Piano e Store", subtitle: "Scopri e sblocca i moduli", icon: "storefront-outline", route: "/store" },
-    { key: "menu", label: "Menu dell'app", subtitle: "Voci visibili in questo negozio", icon: "list-outline", route: "/settings/menu" },
+    { key: "menu", label: "Voci dell'app", subtitle: "Cosa compare nella barra e in Altro", icon: "list-outline", route: "/settings/menu" },
     { key: "vocab", label: "Vocabolari", subtitle: "Tipi, reparti, categorie", icon: "pricetags-outline", route: "/settings/vocab" },
   ]},
   { key: "pay", label: "Clienti e pagamenti", children: [
