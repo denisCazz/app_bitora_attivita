@@ -28,9 +28,3 @@ export function stripeTrialEnd(trialEndsAt: Date | string | null | undefined, no
 export function isDemoEmail(email: string): boolean {
   return email.toLowerCase().endsWith(".demo");
 }
-
-/** The paid module a demo shop keeps locked so the real purchase flow can be tested. */
-export function demoTestModule<T extends { key: ModuleKey; free: boolean; priceCents: number; sortOrder: number }>(modules: readonly T[]): T | null {
-  const paid = modules.filter((module) => !module.free && module.priceCents > 0);
-  return [...paid].sort((a, b) => a.priceCents - b.priceCents || a.sortOrder - b.sortOrder)[0] ?? null;
-}

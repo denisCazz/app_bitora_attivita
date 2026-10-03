@@ -3,7 +3,7 @@ import { categoryChain, planModules, resolveCategory, scoreModules, type Categor
 import { buildManifest, buildNavigation, moduleStatus, renewsBilling } from "./manifest";
 import { MODULE_KEYS } from "./modules";
 import { PERMISSIONS } from "./permissions";
-import { demoTestModule, stripeTrialEnd } from "./store";
+import { stripeTrialEnd } from "./store";
 
 const now = new Date("2026-09-25T12:00:00Z");
 
@@ -231,19 +231,6 @@ describe("stripeTrialEnd", () => {
     expect(stripeTrialEnd("2026-10-01T00:00:00Z", now)?.toISOString()).toBe("2026-10-01T00:00:00.000Z");
     expect(stripeTrialEnd("2026-09-27T00:00:00Z", now)).toBeNull();
     expect(stripeTrialEnd(null, now)).toBeNull();
-  });
-});
-
-describe("demoTestModule", () => {
-  it("picks the cheapest paid module, first by sort order on ties", () => {
-    const modules = [
-      { key: "work_orders" as const, free: true, priceCents: 0, sortOrder: 0 },
-      { key: "assets" as const, free: false, priceCents: 900, sortOrder: 3 },
-      { key: "calendar" as const, free: false, priceCents: 500, sortOrder: 4 },
-      { key: "customers" as const, free: false, priceCents: 500, sortOrder: 2 },
-    ];
-    expect(demoTestModule(modules)?.key).toBe("customers");
-    expect(demoTestModule(modules.slice(0, 1))).toBeNull();
   });
 });
 
