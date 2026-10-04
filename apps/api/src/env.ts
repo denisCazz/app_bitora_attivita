@@ -102,15 +102,15 @@ export const env = {
     },
   },
   legal: {
-    company: process.env.LEGAL_COMPANY_NAME,
-    vatNumber: process.env.LEGAL_VAT_NUMBER,
-    address: process.env.LEGAL_ADDRESS,
+    company: process.env.LEGAL_COMPANY_NAME || "Bitora di Denis Cazzulo",
+    vatNumber: process.env.LEGAL_VAT_NUMBER || "13359170019",
+    address: process.env.LEGAL_ADDRESS || "Carmagnola (TO), 10022",
     rea: process.env.LEGAL_REA,
     pec: process.env.LEGAL_PEC,
-    email: process.env.LEGAL_PRIVACY_EMAIL,
+    email: process.env.LEGAL_PRIVACY_EMAIL || "info@bitora.it",
     dpoEmail: process.env.LEGAL_DPO_EMAIL,
-    court: process.env.LEGAL_COURT,
-    hosting: process.env.LEGAL_HOSTING_PROVIDER,
+    court: process.env.LEGAL_COURT || "Torino",
+    hosting: process.env.LEGAL_HOSTING_PROVIDER || "IONOS SE (Germania)",
   },
   s3: process.env.S3_BUCKET
     ? {
