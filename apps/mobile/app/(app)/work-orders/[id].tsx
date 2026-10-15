@@ -22,7 +22,7 @@ import { WorkOrderForm, workOrderBody, type WorkOrderDraft } from "../../../src/
 import { STATUS_LABEL, toLocalInput } from "../../../src/format";
 import { addressLine, formatDuration, openDirections } from "../../../src/maps";
 import { useAuth } from "../../../src/auth/store";
-import { can, useCanUse, useManifest } from "../../../src/session";
+import { useCanUse, useManifest } from "../../../src/session";
 
 interface ChecklistTemplate {
   id: string;
@@ -101,7 +101,6 @@ export default function WorkOrderScreen() {
   const [viewing, setViewing] = useState<number | null>(null);
   const [exporting, setExporting] = useState(false);
   const order = useQuery({ queryKey: ["work-order", id], queryFn: () => http.get<WorkOrder>(`/work-orders/${id}`) });
-  const hasAccounting = useCanUse("accounting") && can(manifest.data, "accounting.read");
   const hasChecklists = useCanUse("checklists");
   const hasParts = useCanUse("spare_parts");
   const hasStock = useCanUse("stock");
@@ -372,13 +371,6 @@ export default function WorkOrderScreen() {
               <ActionCircle icon="create-outline" label="Modifica" onPress={() => openEdit(data)} />
               <ActionCircle icon="share-outline" label="PDF" loading={exporting} onPress={() => void pdf()} />
             </View>
-            {hasAccounting ? (
-              <Button
-                label="Pagamento"
-                tone="secondary"
-                onPress={() => router.push({ pathname: "/(app)/payments", params: { workOrderId: data.id } })}
-              />
-            ) : null}
 
             <Section title="Cliente e luogo" flush>
               <Rows>

@@ -3,7 +3,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { Switch, View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import { Badge, Card, Pressy, Text, useTheme, withAlpha } from "@rapportini/ui";
-import { monthly } from "../billing";
 
 export type PlanModule = Pick<CatalogModule, "key" | "label" | "description" | "pitch" | "icon" | "priceCents" | "trialDays" | "requires" | "free" | "recommended" | "sortOrder">;
 
@@ -127,9 +126,9 @@ export function PlanPreview({
                 ) : null}
               </View>
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                <Badge label={active ? `Poi ${monthly(module.priceCents)}, se lo tieni` : monthly(module.priceCents)} />
+                <Badge label="Modulo aggiuntivo" />
                 {module.score >= 3 ? <Badge tone="accent" label="Per quello che hai scelto" /> : null}
-                {active ? <Badge tone="success" label={`Gratis ${module.trialDays} giorni, senza carta`} /> : null}
+                {active ? <Badge tone="success" label={`Prova gratis ${module.trialDays} giorni`} /> : null}
               </View>
             </Card>
           </Animated.View>
@@ -140,7 +139,7 @@ export function PlanPreview({
         <Card style={{ gap: 6, borderColor: theme.colors.accent, borderWidth: 1 }}>
           <Text variant="heading">Come funzionano le prove</Text>
           <Text variant="caption" muted>
-            Gratis e senza carta: oggi e alla fine non paghi nulla. Ogni prova finisce da sola e il modulo si blocca, senza rinnovo automatico; i dati restano salvati. Ti avvisiamo 2 giorni prima e, se ti è utile, ti abboni al prezzo indicato.
+            Gratis e senza impegno: ogni prova finisce da sola e i dati inseriti restano salvati. Ti contatteremo prima della scadenza se vorrai mantenerlo attivo.
           </Text>
         </Card>
       ) : null}

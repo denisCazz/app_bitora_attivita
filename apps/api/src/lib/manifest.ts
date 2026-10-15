@@ -59,7 +59,7 @@ export async function manifestFor(userId: string, tenantId: string) {
   const fields = resolveFields([...rows.fields, ...overlay.fields], chain);
   const terms = resolveTerms(rows.termDefaults, [...rows.terms, ...overlay.terms], chain);
   const vocab = resolveVocab(rows.vocabLists, [...rows.vocab, ...overlay.vocab], chain);
-  const menus = resolveNav([...rows.nav, ...overlay.nav], chain);
+  const menus = resolveNav([...rows.nav, ...overlay.nav], chain).filter((item) => item.key !== "payments" && item.route !== "/settings/payments");
   const assetTypes = (vocab.get("asset_types") ?? []).map((item) => item.label);
   const presets: TenantActivityPresets = {
     assetTypes,

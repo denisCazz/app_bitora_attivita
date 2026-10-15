@@ -150,7 +150,6 @@
           "locationWhenInUsePermission": "Serve per mostrarti sulla mappa e trovare gli indirizzi degli interventi."
         }
       ],
-      "expo-iap",
       "@react-native-community/datetimepicker"
     ],
     "extra": {

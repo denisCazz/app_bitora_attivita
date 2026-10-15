@@ -8,7 +8,7 @@ import { useState } from "react";
 import { StyleSheet, Switch, View } from "react-native";
 import { Badge, Button, Card, Pressy, Screen, Sheet, Skeleton, Text, useTheme } from "@rapportini/ui";
 import { http, mediaUrl } from "../../src/api/client";
-import { monthly, useLockedModules } from "../../src/billing";
+import { useLockedModules } from "../../src/billing";
 import { QueryState } from "../../src/components/States";
 import { when } from "../../src/format";
 import { pickHomeActions, useHomeActions } from "../../src/home-actions";
@@ -279,7 +279,7 @@ export default function HomeScreen() {
                   {offer.pitch}
                 </Text>
               </View>
-              <Badge tone="accent" label={monthly(offer.priceCents)} />
+              <Badge tone="accent" label="Scopri" />
             </Card>
           </Pressy>
         ) : null}

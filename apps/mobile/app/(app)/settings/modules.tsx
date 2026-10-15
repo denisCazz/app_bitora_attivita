@@ -5,7 +5,6 @@ import { Switch, View } from "react-native";
 import { Badge, Button, Card, Screen, Text, useTheme } from "@rapportini/ui";
 import { http } from "../../../src/api/client";
 import { queryClient } from "../../../src/api/query";
-import { monthly } from "../../../src/billing";
 
 interface ModuleRow {
   moduleKey: ModuleKey;
@@ -31,7 +30,7 @@ export default function ModulesScreen() {
   return (
     <Screen onBack={() => router.back()} backLabel="Impostazioni">
       <Text variant="display">Moduli</Text>
-      <Text muted>Quello che spegni sparisce dall'app, per tutti. I moduli bloccati si sbloccano dallo Store.</Text>
+      <Text muted>Quello che spegni sparisce dall'app, per tutti. I moduli aggiuntivi si possono provare o richiedere.</Text>
       {query.data?.map((row) => (
         <Card key={row.moduleKey} style={{ gap: 10, opacity: row.status === "locked" ? 0.85 : 1 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -53,10 +52,10 @@ export default function ModulesScreen() {
           <View style={{ flexDirection: "row", gap: 8 }}>
             {row.free ? <Badge tone="success" label="Incluso" /> : null}
             {row.status === "trial" ? <Badge tone="accent" label="In prova" /> : null}
-            {!row.free && row.status !== "locked" && row.status !== "trial" ? <Badge tone="accent" label={monthly(row.priceCents)} /> : null}
+            {!row.free && row.status !== "locked" && row.status !== "trial" ? <Badge tone="accent" label="Modulo aggiuntivo" /> : null}
           </View>
           {row.status === "locked" ? (
-            <Button tone="secondary" label={`Sblocca · ${monthly(row.priceCents)}`} onPress={() => router.push({ pathname: "/(app)/store/[key]", params: { key: row.moduleKey } })} />
+            <Button tone="secondary" label="Scopri modulo" onPress={() => router.push({ pathname: "/(app)/store/[key]", params: { key: row.moduleKey } })} />
           ) : null}
         </Card>
       ))}
