@@ -1,8 +1,9 @@
 import { PERMISSION_COPY, TERMINOLOGY_KEYS, type Permission, type Terminology } from "@rapportini/shared";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { View } from "react-native";
+import { Switch, View } from "react-native";
 import { Badge, Card, Screen, Text, useTheme } from "@rapportini/ui";
-import { useAdminUser, type AdminUserShop } from "../../../../src/admin";
+import { useAdminMutation, useAdminUser, type AdminUserShop } from "../../../../src/admin";
+import { http } from "../../../../src/api/client";
 import { QueryState } from "../../../../src/components/States";
 
 const TERM_LABEL: Record<keyof Terminology, string> = {
@@ -42,15 +43,17 @@ const FIELD_TYPE: Record<string, string> = {
 };
 
 function moduleState(module: AdminUserShop["modules"][number]) {
-  if (!module.enabled) return "spento";
-  if (module.licensed) return "a pagamento";
+  if (module.free) return module.enabled ? "incluso" : "spento";
+  if (module.licensed) return module.enabled ? "sbloccato" : "sbloccato (spento)";
   if (module.trialEndsAt && new Date(module.trialEndsAt) > new Date()) return "in prova";
-  if (module.free) return "incluso";
-  return "acceso";
+  return "bloccato";
 }
 
 function ShopCard({ shop }: { shop: AdminUserShop }) {
   const theme = useTheme();
+  const toggleModule = useAdminMutation((input: { moduleKey: string; licensed: boolean }) =>
+    http.put(`/admin/shops/${shop.id}/modules`, input),
+  );
   const words = TERMINOLOGY_KEYS.flatMap((key) => {
     const value = shop.terminology[key];
     return value ? [`${TERM_LABEL[key]}: ${value}`] : [];
@@ -93,13 +96,25 @@ function ShopCard({ shop }: { shop: AdminUserShop }) {
         <Text muted>{words.length ? words.join("\n") : "Usa i termini della categoria, senza modifiche."}</Text>
       </View>
 
-      <View style={{ gap: 6 }}>
+      <View style={{ gap: 8 }}>
         <Text variant="heading">Moduli</Text>
         {shop.modules.length ? (
           shop.modules.map((module) => (
-            <View key={module.key} style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
-              <Text>{module.label}</Text>
-              <Text muted>{moduleState(module)}</Text>
+            <View key={module.key} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text>{module.label}</Text>
+                <Text variant="caption" muted>{moduleState(module)}</Text>
+              </View>
+              {module.free ? (
+                <Badge tone="success" label="Incluso" />
+              ) : (
+                <Switch
+                  value={module.licensed}
+                  onValueChange={(licensed) => toggleModule.mutate({ moduleKey: module.key, licensed })}
+                  trackColor={{ true: theme.colors.accent, false: theme.colors.line }}
+                  thumbColor="#fff"
+                />
+              )}
             </View>
           ))
         ) : (

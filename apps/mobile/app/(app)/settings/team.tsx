@@ -6,11 +6,9 @@ import { View } from "react-native";
 import { Badge, Button, Card, Input, Screen, Sheet, Text, useTheme } from "@rapportini/ui";
 import { http } from "../../../src/api/client";
 import { queryClient } from "../../../src/api/query";
-import { checkoutNotice, monthly, useCheckoutResult, useUpdateSeats, type Notice, type SeatsResult } from "../../../src/billing";
 import { Chip } from "../../../src/components/Chip";
 import { EmployeeForm } from "../../../src/components/EmployeeForm";
 import { QueryState } from "../../../src/components/States";
-import { can, useManifest } from "../../../src/session";
 
 interface TeamSeat {
   used: number;
@@ -60,18 +58,11 @@ function message(error: unknown) {
 export default function TeamScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const manifest = useManifest();
-  const canBill = can(manifest.data, "settings.manage");
   const [confirmId, setConfirmId] = useState<string | null>(null);
-  const [confirmDrop, setConfirmDrop] = useState(false);
-  const [confirmAdd, setConfirmAdd] = useState(false);
-  const [seatNotice, setSeatNotice] = useState<Notice | null>(null);
-  useCheckoutResult((result) => setSeatNotice(checkoutNotice(result)));
   const [passwordFor, setPasswordFor] = useState<TeamMember | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const team = useQuery({ queryKey: ["team"], queryFn: () => http.get<Team>("/team") });
   const roles = useQuery({ queryKey: ["roles"], queryFn: () => http.get<Role[]>("/roles") });
-  const seats = useUpdateSeats();
 
   async function refresh() {
     await Promise.all([queryClient.invalidateQueries({ queryKey: ["team"] }), queryClient.invalidateQueries({ queryKey: ["roles"] })]);
@@ -108,41 +99,8 @@ export default function TeamScreen() {
   const manage = Boolean(data?.canManage);
   const assignable = (roles.data ?? []).filter((role) => !role.isSystem);
   const full = Boolean(data && data.seats.used >= data.seats.capacity);
-  const spare = data ? data.seats.extra - Math.max(0, data.seats.used - data.seats.included) : 0;
-  const error = changeRole.error ?? remove.error ?? reactivate.error ?? revoke.error ?? seats.error;
-  const summary = !data
-    ? ""
-    : data.seats.extra
-      ? `${data.seats.used} collegati · ${data.seats.included} inclusi + ${data.seats.extra} a pagamento`
-      : `${data.seats.used} di ${data.seats.included} inclusi`;
-
-  function changeSeats(extraSeats: number) {
-    setSeatNotice(null);
-    seats.mutate(extraSeats, {
-      onSuccess: (result: SeatsResult) => {
-        if (result.mode === "stripe") {
-          setSeatNotice(result.outcome ? checkoutNotice(result.outcome) : { tone: "muted", text: "Completa il pagamento nella pagina di Stripe: quando torni qui il posto è già pronto." });
-        } else if (result.mode === "demo") {
-          setSeatNotice({ tone: "success", text: "Posti aggiornati (modalità demo: nessun addebito)." });
-        } else {
-          setSeatNotice({ tone: "success", text: "Posti aggiornati." });
-        }
-      },
-    });
-  }
-
-  function addSeat() {
-    if (!data) return;
-    setConfirmDrop(false);
-    setConfirmAdd(false);
-    changeSeats(data.seats.extra + 1);
-  }
-
-  function dropSeat() {
-    if (!data || data.seats.extra === 0) return;
-    setConfirmAdd(false);
-    setConfirmDrop(true);
-  }
+  const error = changeRole.error ?? remove.error ?? reactivate.error ?? revoke.error;
+  const summary = !data ? "" : `${data.seats.used} di ${data.seats.capacity} posti usati`;
 
   function closePassword() {
     setPasswordFor(null);
@@ -153,7 +111,7 @@ export default function TeamScreen() {
   return (
     <Screen onBack={() => router.back()} backLabel="Indietro">
       <Text variant="display">Dipendenti</Text>
-      <Text muted>Chi entra nell'app di questo negozio. Tre utenti sono inclusi. Dal quarto, 5€ al mese per utente.</Text>
+      <Text muted>Chi entra nell'app di questo negozio.</Text>
       <QueryState isLoading={team.isLoading} error={team.error} refetch={() => void team.refetch()}>
         {data ? (
           <Card style={{ gap: 12 }}>
@@ -161,52 +119,11 @@ export default function TeamScreen() {
               <View style={{ flex: 1, gap: 4 }}>
                 <Text variant="heading">{summary}</Text>
                 <Text variant="caption" muted>
-                  {data.seats.extra ? `${monthly(data.seats.monthlyCents)} per gli utenti extra` : `Poi ${monthly(data.seats.priceCents)} per utente`}
+                  {data.seats.extra ? `${data.seats.included} inclusi + ${data.seats.extra} aggiuntivi` : `${data.seats.included} utenti inclusi nel piano`}
                 </Text>
               </View>
               <Ionicons name="people-outline" size={22} color={theme.colors.accent} />
             </View>
-            {canBill && manage && data.seats.extra > 0 && !confirmDrop ? (
-              <Button tone="secondary" label={spare > 0 ? "Togli un posto non usato" : "Togli un posto"} loading={seats.isPending} onPress={dropSeat} />
-            ) : null}
-            {canBill && manage && full && !confirmAdd ? <Button label={`Aggiungi un utente · ${monthly(data.seats.priceCents)}`} loading={seats.isPending} onPress={() => setConfirmAdd(true)} /> : null}
-            {confirmAdd ? (
-              <View style={{ gap: 8 }}>
-                <Text variant="caption">
-                  {data.seats.extra
-                    ? `Il tuo abbonamento utenti passa da ${monthly(data.seats.monthlyCents)} a ${monthly(data.seats.monthlyCents + data.seats.priceCents)}. Oggi addebitiamo sulla carta solo la quota dei giorni che mancano al prossimo rinnovo; poi il nuovo importo ogni mese.`
-                    : `Nuovo abbonamento mensile con carta: ${monthly(data.seats.priceCents)} per l'utente in più, addebitato oggi e poi ogni mese alla stessa data. Disdici quando vuoi togliendo il posto.`}
-                </Text>
-                <Button label={`Conferma · +${monthly(data.seats.priceCents)}`} loading={seats.isPending} onPress={addSeat} />
-                <Button tone="ghost" label="Annulla" onPress={() => setConfirmAdd(false)} />
-              </View>
-            ) : null}
-            {confirmDrop && data.seats.extra > 0 ? (
-              <View style={{ gap: 8 }}>
-                <Text variant="caption">
-                  {`${
-                    data.seats.extra === 1
-                      ? "L'abbonamento utenti si chiude subito: nessun altro addebito."
-                      : `Il costo scende di ${monthly(data.seats.priceCents)}. I giorni già pagati di questo posto diventano un credito sulla prossima fattura.`
-                  }${spare > 0 ? "" : " L'ultimo utente aggiunto resta sospeso e non entra più, finché non ricompri il posto."}`}
-                </Text>
-                <Button
-                  tone="danger"
-                  label="Conferma, togli il posto"
-                  loading={seats.isPending}
-                  onPress={() => {
-                    setConfirmDrop(false);
-                    changeSeats(data.seats.extra - 1);
-                  }}
-                />
-                <Button tone="ghost" label="Annulla" onPress={() => setConfirmDrop(false)} />
-              </View>
-            ) : null}
-            {seatNotice ? (
-              <Text variant="caption" style={{ color: seatNotice.tone === "danger" ? theme.colors.danger : seatNotice.tone === "success" ? theme.colors.success : theme.colors.inkSoft }}>
-                {seatNotice.text}
-              </Text>
-            ) : null}
           </Card>
         ) : null}
 
@@ -289,7 +206,7 @@ export default function TeamScreen() {
         ) : null}
         {manage && full ? (
           <Text variant="caption" muted>
-            Hai usato tutti i posti. Aggiungi un utente qui sopra per collegare un'altra persona.
+            Hai usato tutti i posti disponibili nel tuo piano.
           </Text>
         ) : null}
         {error ? <Text style={{ color: theme.colors.danger }}>{message(error)}</Text> : null}

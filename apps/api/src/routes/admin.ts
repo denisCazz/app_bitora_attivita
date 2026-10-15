@@ -66,16 +66,16 @@ async function platformAccounts() {
         needs: tenant.needs.map((key) => ({ key, label: category?.needs.find((need) => need.key === key)?.label ?? key })),
         branding: { accent: tenant.accent, logoUrl: tenant.logoUrl },
         terminology: Object.fromEntries(tenant.termValues.map((row) => [row.termKey, row.value])),
-        modules: tenant.modules.map((row) => {
-          const fromCategory = category?.modules.find((module) => module.key === row.moduleKey);
-          const fromCatalog = definitions.find((module) => module.key === row.moduleKey);
+        modules: (category?.modules ?? []).map((catMod) => {
+          const row = tenant.modules.find((item) => item.moduleKey === catMod.key);
+          const fromCatalog = definitions.find((module) => module.key === catMod.key);
           return {
-            key: row.moduleKey,
-            label: fromCategory?.label ?? fromCatalog?.label ?? row.moduleKey,
-            enabled: row.enabled,
-            licensed: row.licensed,
-            free: fromCategory?.free ?? false,
-            trialEndsAt: row.trialEndsAt?.toISOString() ?? null,
+            key: catMod.key,
+            label: catMod.label ?? fromCatalog?.label ?? catMod.key,
+            enabled: row ? row.enabled : catMod.free,
+            licensed: row ? row.licensed : false,
+            free: catMod.free,
+            trialEndsAt: row?.trialEndsAt?.toISOString() ?? null,
           };
         }),
         fields: tenant.fieldDefs.map((field) => ({
@@ -291,5 +291,18 @@ export async function adminRoutes(app: FastifyInstance) {
     await prisma.need.deleteMany({ where: { id: param(request, "id") } });
     invalidateCatalog();
     return { ok: true };
+  });
+
+  app.put("/admin/shops/:id/modules", { preHandler: admin }, async (request) => {
+    const body = parseBody(z.object({ moduleKey: z.string().min(1), licensed: z.boolean(), enabled: z.boolean().optional() }), request.body);
+    const tenantId = param(request, "id");
+    if (!isModuleKey(body.moduleKey)) throw new HttpError(404, "Modulo sconosciuto");
+    await must(prisma.tenant.findUnique({ where: { id: tenantId } }), "Negozio");
+    const enabled = body.enabled ?? body.licensed;
+    return prisma.tenantModule.upsert({
+      where: { tenantId_moduleKey: { tenantId, moduleKey: body.moduleKey } },
+      create: { tenantId, moduleKey: body.moduleKey, licensed: body.licensed, enabled, billingSource: body.licensed ? "DEMO" : null, licenseExpiresAt: null },
+      update: { licensed: body.licensed, enabled, billingSource: body.licensed ? "DEMO" : null, licenseExpiresAt: null },
+    });
   });
 }

@@ -18,7 +18,7 @@ const placeOf = (placement: string) => PLACEMENT[placement] ?? placement;
 
 export default function ShopMenuScreen() {
   const router = useRouter();
-  const menu = useMenu("TAB").concat(useMenu("MORE"), useMenu("SETTINGS"), useMenu("HOME_ACTIONS"));
+  const menu = useMenu("TAB").concat(useMenu("MORE"), useMenu("SETTINGS"), useMenu("HOME_ACTIONS")).filter((item) => item.key !== "payments" && item.route !== "/settings/payments");
   const own = useQuery({ queryKey: ["shop-config"], queryFn: () => http.get<{ nav: NavRow[] }>("/settings/config") });
   const hide = useMutation({
     mutationFn: (item: { placement: string; key: string; kind: string; label: string }) =>

@@ -8,7 +8,7 @@ import { http } from "../../src/api/client";
 import { Chevron, Menu, MenuRow } from "../../src/components/Menu";
 import { queryClient } from "../../src/api/query";
 import { useAuth } from "../../src/auth/store";
-import { daysLeft, monthly } from "../../src/billing";
+import { daysLeft } from "../../src/billing";
 import { t } from "../../src/i18n";
 import { can, modulePermitted, useManifest, useMenu } from "../../src/session";
 
@@ -137,7 +137,7 @@ export default function MoreScreen() {
               />
             ) : null}
             {showSettings ? (
-              <MenuRow icon="settings-outline" title="Impostazioni" subtitle="Logo, ruoli, campi, moduli e incassi" onPress={() => router.push("/(app)/settings")} />
+              <MenuRow icon="settings-outline" title="Impostazioni" subtitle="Logo, ruoli, campi e moduli" onPress={() => router.push("/(app)/settings")} />
             ) : null}
           </Menu>
         </View>
@@ -176,7 +176,7 @@ export default function MoreScreen() {
                 tone="muted"
                 title={module.label}
                 subtitle={module.pitch}
-                trailing={<Badge label={monthly(module.priceCents)} />}
+                trailing={<Badge label="Extra" />}
                 onPress={() => router.push({ pathname: "/(app)/store", params: { module: module.key } })}
               />
             ))}

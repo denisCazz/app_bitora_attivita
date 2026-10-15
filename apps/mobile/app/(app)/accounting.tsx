@@ -152,10 +152,11 @@ export default function AccountingReportScreen() {
         </Text>
       </View>
 
-      <Card>
-        <ListItem title="Pagamenti" subtitle="Stato, link e QR per ogni intervento" onPress={() => router.push("/(app)/payments")} />
-        {showPay ? <ListItem title="Dipendenti" subtitle="Stipendi calcolati dalle ore, già nelle uscite" onPress={() => router.push("/(app)/payroll")} /> : null}
-      </Card>
+      {showPay ? (
+        <Card>
+          <ListItem title="Dipendenti" subtitle="Stipendi calcolati dalle ore, già nelle uscite" onPress={() => router.push("/(app)/payroll")} />
+        </Card>
+      ) : null}
 
       <View style={{ flexDirection: "row", gap: 8 }}>
         {PERIODS.map((period) => (

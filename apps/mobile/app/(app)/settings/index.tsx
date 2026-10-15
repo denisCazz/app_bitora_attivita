@@ -20,8 +20,7 @@ const FALLBACK = [
     { key: "menu", label: "Voci dell'app", subtitle: "Cosa compare nella barra e in Altro", icon: "list-outline", route: "/settings/menu" },
     { key: "vocab", label: "Vocabolari", subtitle: "Tipi, reparti, categorie", icon: "pricetags-outline", route: "/settings/vocab" },
   ]},
-  { key: "pay", label: "Clienti e pagamenti", children: [
-    { key: "payments", label: "Incassi", subtitle: "Stripe, Revolut o Satispay", icon: "card-outline", route: "/settings/payments" },
+  { key: "pay", label: "Clienti", children: [
     { key: "reminders", label: "Promemoria ai clienti", subtitle: "Avvisi prima delle scadenze", icon: "notifications-outline", route: "/settings/reminders" },
   ]},
 ];
@@ -29,8 +28,8 @@ const FALLBACK = [
 export default function SettingsScreen() {
   const router = useRouter();
   const manifest = useManifest();
-  const menu = useMenu("SETTINGS");
-  const groups = menu.filter((item) => item.kind === "GROUP");
+  const menu = useMenu("SETTINGS").filter((item) => item.key !== "payments" && item.route !== "/settings/payments");
+  const groups = menu.filter((item) => item.kind === "GROUP").map((group) => (group.key === "pay" && group.label === "Clienti e pagamenti" ? { ...group, label: "Clienti" } : group));
   const rows = menu.filter((item) => item.kind !== "GROUP" && (!item.permission || can(manifest.data, item.permission)));
   const sections = groups.length
     ? groups.map((group) => ({ key: group.key, label: group.label, children: rows.filter((row) => row.parentKey === group.key) }))
